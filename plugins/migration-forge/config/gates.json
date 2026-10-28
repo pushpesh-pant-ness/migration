@@ -1,0 +1,30 @@
+{
+  "_doc": "Default gate thresholds. Copy to <workspace>/forge/gates.json to override per run. A required check that cannot run (tool missing, no data) FAILS - it never passes silently. Verdict is PASS only when every required check passes AND overall_score >= min_overall_score. A file named in $FORGE_GATES_OVERRIDE is merged last (used by CI).",
+  "min_overall_score": 85,
+  "max_remediation_iterations": 3,
+  "checks": {
+    "tests":       { "required": true,  "weight": 3, "max_failed": 0, "min_total": 1 },
+    "coverage":    { "required": true,  "weight": 2, "min_diff_line_pct": 80, "min_line_pct": 70, "_doc": "Gated on changed lines since state.base_ref (diff-cover) when measurable; otherwise on overall line coverage against min_line_pct." },
+    "lint":        { "required": false, "weight": 1, "max_errors": 0 },
+    "typecheck":   { "required": true,  "weight": 2, "max_errors": 0 },
+    "security":    { "required": true,  "weight": 3, "max_critical": 0, "max_high": 0, "max_secrets": 0, "max_license_violations": 0, "require_claude_security": true, "_license_doc": "Trivy licence findings rated CRITICAL (forbidden, e.g. AGPL) or HIGH (restricted, e.g. GPL). Needs installed deps (node_modules / site-packages) to see transitive licences." },
+    "review":      { "required": true,  "weight": 2, "max_blocking": 0, "max_major": 5, "_doc": "Code review of the diff since state.base_ref: built-in /code-review + code-modernization architecture-critic (ADR drift). Evidence: forge/evidence/code-review.json" },
+    "behavior":    { "required": true,  "weight": 3, "max_not_proven": 0, "max_partly_proven": 0, "min_acceptance_pass_pct": 100 },
+    "database":    { "_doc": "applies only when state.db_migration is true (opt-in); otherwise n/a", "required": true,  "weight": 3, "min_row_match_pct": 100, "require_reversible": true, "max_lint_errors": 0 },
+    "cost":        { "required": true,  "weight": 1, "max_tokens": 0, "max_monthly_usd": 0, "max_monthly_increase_pct": 10 },
+    "performance": { "required": false, "weight": 1, "max_p95_regression_pct": 10 }
+  },
+  "commands": {
+    "_doc": "Leave empty to auto-detect. Commands run with cwd = modernized code root. coverage_report = path (relative to that root) of lcov.info, cobertura/coverage.xml or jacoco.xml (these also enable changed-line coverage), or coverage-summary.json (Istanbul) / coverage.json (coverage.py) for overall only.",
+    "test": "",
+    "coverage_report": "",
+    "lint": "",
+    "typecheck": ""
+  },
+  "scanners": {
+    "semgrep_configs": ["p/default", "p/secrets"],
+    "trivy_scanners": "vuln,secret,misconfig,license",
+    "squawk_for_postgres": true
+  },
+  "timeouts_seconds": { "default": 900, "tests": 1800 }
+}

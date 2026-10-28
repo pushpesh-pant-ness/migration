@@ -1,0 +1,8 @@
+{
+  "_doc": "CI profile, merged over the effective gates via FORGE_GATES_OVERRIDE. CI has no Claude session, so model-produced evidence (claude-security summary, code review) and transcript-based token cost are not available unless the optional claude-evidence job is enabled. Everything deterministic stays required at the same thresholds.",
+  "checks": {
+    "security": { "require_claude_security": false },
+    "review": { "required": false },
+    "cost": { "required": false }
+  }
+}

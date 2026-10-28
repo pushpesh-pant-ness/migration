@@ -1,0 +1,35 @@
+{
+  "_doc": "Approved target families per source technology. Versions are deliberately NOT pinned here (they go stale): stack-researcher pins exact versions at plan time from Context7 / official release pages and records them in the ADR. Edit 'preferred' to encode your org's standards.",
+  "version_policy": {
+    "rule": "Use the newest LTS (or newest stable if the project has no LTS) that has been released for at least 60 days and is inside its support window for >= 18 more months.",
+    "evidence_required": "Release date and end-of-support date with a source URL for every pinned component."
+  },
+  "frontend": {
+    "angularjs":        { "preferred": ["angular", "react"], "notes": "AngularJS is EOL. Angular keeps DI/templating mental model; React+TS for component rewrite. Strangler via angular-elements or route-by-route." },
+    "angular-legacy":   { "preferred": ["angular"], "notes": "Use 'ng update' one major at a time; standalone components + signals at the end." },
+    "jquery":           { "preferred": ["react", "vue"], "notes": "Island-by-island replacement; keep server-rendered pages until each island is ported." },
+    "react-legacy":     { "preferred": ["react"], "notes": "Class components -> function+hooks; CRA -> Vite; enzyme -> Testing Library." },
+    "vue2":             { "preferred": ["vue"], "notes": "Vue 2 is EOL; @vue/compat migration build first." },
+    "server-templates": { "preferred": ["react", "keep-ssr"], "notes": "JSP/Razor/Thymeleaf/PHP views: decide SPA vs modern SSR in the ADR." }
+  },
+  "backend": {
+    "express-js":       { "preferred": ["nestjs", "fastify-ts"], "notes": "Convert to TypeScript first, then framework." },
+    "java-spring-old":  { "preferred": ["spring-boot"], "notes": "javax -> jakarta namespace; OpenRewrite recipes for Boot 2->3." },
+    "java-ee":          { "preferred": ["spring-boot", "quarkus"], "notes": "EJB/JAX-WS: extract service boundaries first." },
+    "dotnet-framework": { "preferred": ["dotnet-lts"], "notes": "Use .NET Upgrade Assistant; WCF -> CoreWCF or gRPC/REST." },
+    "php-legacy":       { "preferred": ["php-current+laravel", "php-current+symfony"], "notes": "Rector for automated upgrades." },
+    "python-legacy":    { "preferred": ["django-lts", "fastapi"], "notes": "py2 -> py3 first if needed." },
+    "node-legacy":      { "preferred": ["node-lts"], "notes": "Pin the active LTS line." }
+  },
+  "database": {
+    "mysql":      { "preferred": ["mysql-lts", "postgresql"], "notes": "Same-engine upgrade is lower risk; cross-engine only with a stated reason in the ADR." },
+    "mariadb":    { "preferred": ["mariadb-lts", "postgresql"] },
+    "sqlserver":  { "preferred": ["sqlserver-current", "postgresql"], "notes": "T-SQL procs are the main cross-engine cost." },
+    "oracle":     { "preferred": ["postgresql"], "notes": "PL/SQL -> PL/pgSQL; use ora2pg for the assessment." },
+    "postgresql": { "preferred": ["postgresql-current"] }
+  },
+  "migration_tooling": {
+    "schema": ["flyway", "liquibase", "alembic", "prisma-migrate", "ef-core-migrations"],
+    "postgres_lint": "squawk"
+  }
+}

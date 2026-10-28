@@ -1,0 +1,11 @@
+# Release checklist
+- [ ] Latest scorecard PASS and gatekeeper PASS (link iteration)
+- [ ] VERIFICATION.md: all in-scope modules PROVEN, signed by approver + second engineer
+- [ ] SECURITY_FINDINGS.md (modernize-harden): no open critical/high; accepted risks documented with owner
+- [ ] Dependency licences reviewed (no new copyleft in proprietary code without approval)
+- [ ] Observability: logs, metrics, traces, alerts for P0 flows
+- [ ] Performance smoke (k6) p95 within threshold vs legacy
+- [ ] Runbooks: deploy, rollback, DB cutover (db-cutover.md complete)
+- [ ] Cost report reviewed (`forge/decisions/cost-report.md`)
+- [ ] Jira export produced / synced; all epics' children done
+- [ ] Human release approval recorded (`state.py approve release`)

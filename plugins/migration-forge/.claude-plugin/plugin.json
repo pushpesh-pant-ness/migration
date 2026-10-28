@@ -1,0 +1,15 @@
+{
+  "name": "migration-forge",
+  "displayName": "Migration Forge",
+  "version": "0.1.0",
+  "description": "Story + repo (frontend, backend, SQL DB) in; gated, verified modernization out. Orchestrates Anthropic's code-modernization plugin and adds a local Jira-style backlog, target-stack research, quality/security/cost/eval gates with an auto-remediation loop, and an optional (opt-in) SQL database-migration track.",
+  "author": { "name": "AI_OFFICE_NESS" },
+  "license": "Apache-2.0",
+  "keywords": ["migration", "modernization", "legacy", "sql", "quality-gates", "security", "jira"],
+  "dependencies": [
+    "code-modernization@claude-plugins-official",
+    "claude-security@claude-plugins-official",
+    "security-guidance@claude-plugins-official",
+    "context7@claude-plugins-official"
+  ]
+}

@@ -1,0 +1,13 @@
+# Database cutover checklist
+- [ ] Strategy approved (`forge/db/strategy.md`): in-place / expand-contract / dual-write-CDC / big-bang
+- [ ] Every migration has a tested down/undo; reversibility PASS in `forge/db/verify.json`
+- [ ] Postgres targets: squawk lint clean (locks, NOT NULL without default, non-concurrent index)
+- [ ] Rehearsal on a production-sized copy: duration ____ (downtime budget ____)
+- [ ] Data parity: `db_verify.py compare` 100% rows + checksums; every exclusion justified
+- [ ] Sequences/identity values re-seeded above max(id)
+- [ ] Collation/charset/time zone verified with sql_diff eval cases
+- [ ] Backups taken and restore tested; point-in-time recovery window known
+- [ ] Application feature flag / connection switch ready; rollback switch tested
+- [ ] Write freeze (or CDC lag ≈ 0) confirmed at cutover moment
+- [ ] Post-cutover smoke: P0 eval cases green against the new DB
+- [ ] Legacy DB kept read-only for ____ days before decommission
