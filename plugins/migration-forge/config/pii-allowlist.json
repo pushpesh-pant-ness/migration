@@ -1,8 +1,0 @@
-{
-  "_doc": "Values the PII scanner (scripts/pii_scan.py) treats as fake/safe, and paths it skips. Copy to <workspace>/forge/pii-allowlist.json to extend per run (lists are merged). A true false positive can also be allowed on its own line with 'pii-allow: <reason>' - those are still listed and counted.",
-  "email_domains": ["example.com", "example.org", "example.net", "test.com", "localhost", "noreply.local"],
-  "test_card_numbers": [],
-  "skip_dirs": [".git", "node_modules", "target", "build", "dist", "__pycache__", ".venv", "venv", ".idea", ".gradle", ".mvn", "vendor", ".scannerwork"],
-  "skip_extensions": [".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip", ".jar", ".war", ".class", ".gz", ".woff", ".woff2", ".ttf", ".lock", ".min.js", ".map"],
-  "skip_files": ["package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock"]
-}

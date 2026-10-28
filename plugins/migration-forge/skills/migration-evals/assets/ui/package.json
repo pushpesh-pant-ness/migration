@@ -1,8 +1,0 @@
-{
-  "name": "forge-ui-parity",
-  "private": true,
-  "description": "UI parity specs: each spec runs against legacy (must pass) then the modernized app. Copied by eval-designer to forge/evals/ui/.",
-  "devDependencies": {
-    "@playwright/test": "^1.50.0"
-  }
-}
