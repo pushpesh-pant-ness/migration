@@ -11,7 +11,7 @@ export const meta = {
 if (!args || !args.plugin_root) throw new Error('gate-loop needs args {name, plugin_root, max_iterations}')
 const F = `bash "${args.plugin_root}/scripts/py.sh"`
 const MAX = args.max_iterations || 3
-const ORDER = ['security', 'behavior', 'database', 'review', 'tests', 'typecheck', 'coverage', 'lint', 'cost', 'performance']
+const ORDER = ['security', 'pii', 'behavior', 'database', 'review', 'static', 'tests', 'typecheck', 'coverage', 'lint', 'cost', 'performance']
 
 const GATE_SCHEMA = {
   type: 'object',
@@ -75,6 +75,7 @@ Do not remediate. Return the iteration number, verdict, overall score and failur
     const mine = fails.filter(f => f.check === c)
     const res = await agent(
       `Gate iteration ${gate.iteration} for run "${args.name}" failed check "${c}":\n${mine.map(f => '- ' + f.why).join('\n')}
+The exact findings (file:line - rule - message) are in forge/gates/iteration-${gate.iteration}/feedback.md under "## ${c}".
 Fix the root causes per your instructions and verify with the underlying tool. Do not run run_gates.py.`,
       { label: `fix ${c} #${i}`, phase: 'Remediate', agentType: 'migration-forge:remediation-engineer', schema: FIX_SCHEMA })
     const human = ((res && res.items) || []).filter(x => x.status === 'needs_human')

@@ -4,8 +4,9 @@
 Blocks (exit 2, reason on stderr):
   - any write into legacy/ or the original repo path (legacy code is read-only evidence)
   - hand edits of script-owned evidence: tracker.json, history.log, gate scorecards,
-    db/verify.json, evals/results.json
-  - edits of gate thresholds (forge/gates.json): thresholds are changed by humans, outside Claude
+    db/verify.json, evals/results.json, the Claude cost ledger (cost/ledger.jsonl)
+  - edits of gate thresholds (forge/gates.json) and the PII allowlist (forge/pii-allowlist.json):
+    both are changed by humans, outside Claude
   - shell commands that delete/overwrite/redirect into legacy/
   - hand edits of forge/state.json (phase + approvals live there)
 Asks (forces a human permission prompt, even when the session auto-approves Bash):
@@ -22,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from forgelib import FORGE_DIR, find_workspace as find_ws, native_path, read_json  # noqa: E402
 
 OWNED = [("tracker", "tracker.json"), ("tracker", "history.log"), ("db", "verify.json"),
-         ("evals", "results.json")]
+         ("evals", "results.json"), ("evals", "results-legacy.json"), ("cost", "ledger.jsonl")]
 
 
 def inside(path, root):
@@ -79,6 +80,9 @@ def main():
             block("gate scorecards are produced only by run_gates.py; fix the code, then re-run the gate.")
         if p == fd / "gates.json":
             block("gate thresholds are human-owned. Ask the user to edit forge/gates.json themselves.")
+        if p == fd / "pii-allowlist.json":
+            block("the PII allowlist is human-owned. Ask the user to edit forge/pii-allowlist.json themselves, "
+                  "or mark a single synthetic value with 'pii-allow: <reason>' on its line (it stays visible in the gate).")
         if p == fd / "state.json":
             block("forge/state.json (phase, approvals) is owned by state.py; use state.py set/phase/approve.")
         sys.exit(0)
@@ -102,7 +106,7 @@ def main():
                 block(f"command would modify legacy/: `{seg.strip()[:160]}`")
             if re.search(r"(>{1,2}|\btee\s+(-a\s+)?)\s*[\"']?[^\s\"'|]*legacy[\\/]", seg):
                 block(f"command would write into legacy/: `{seg.strip()[:160]}`")
-            if re.search(r">{1,2}\s*[\"']?\S*forge[\\/](gates[\\/]|gates\.json|tracker[\\/]tracker\.json)", seg):
+            if re.search(r">{1,2}\s*[\"']?\S*forge[\\/](gates[\\/]|gates\.json|pii-allowlist\.json|tracker[\\/]tracker\.json|cost[\\/]ledger)", seg):
                 block("redirecting into script-owned forge evidence is not allowed")
     sys.exit(0)
 

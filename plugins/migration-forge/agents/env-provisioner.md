@@ -24,7 +24,7 @@ You make "run both systems and compare them" a single command. Golden-master eva
 2. `seed/`: **synthetic or masked** data only. Never production PII.
    - Cover the edge cases in `${CLAUDE_PLUGIN_ROOT}/skills/migration-evals/SKILL.md`: zero and negative amounts, unicode, DST timestamps, and the dirty legacy rows found during discovery.
    - State the origin of the data in `seed/README.md`.
-3. `env.json` in the format documented in `${CLAUDE_PLUGIN_ROOT}/scripts/env.py`. List the DB services in `data_services` so `env.py reset` can restore the seed.
+3. `env.json` in the format documented in `${CLAUDE_PLUGIN_ROOT}/scripts/env.py`. List the DB services in `data_services` so `env.py reset` can restore the seed. For a system with several HTTP services, add `"services": {"<name>": {"legacy": "http://localhost:18081", "new": "http://localhost:28081"}}` (one port pair per service), so eval cases can target each one with `"service": "<name>"`.
 4. Secrets: use the `.env` file in `forge/env/` (gitignored) or `${VAR}` references. Never commit real credentials. If legacy has hardcoded credentials, they work against the seeded container DB. Do not copy them anywhere else.
 
 ## Verify, then report

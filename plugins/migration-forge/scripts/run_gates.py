@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Run every gate tool against the modernized code and write a scored scorecard.
 
-  run_gates.py [--root modernized/<name>] [--only tests,security] [--no-run-tests]
+  run_gates.py [--root modernized/<name>] [--only tests,security]
+  run_gates.py --baseline [--root legacy/<name>]     # score the legacy code once (static, security, pii); never fails
 
-Writes forge/gates/iteration-N/{raw/*, scorecard.json} and forge/gates/latest.json.
+Writes forge/gates/iteration-N/{raw/*, scorecard.json, feedback.md} and forge/gates/latest.json
+(baseline: forge/gates/baseline/, no iteration and no gate_history entry; compare with gate_compare.py).
+Scanners (Semgrep, Gitleaks, Trivy, SonarQube) run locally when installed, else in Docker (scanners.py, sonar.py).
 Evidence produced by agents is read, not generated, here:
   forge/evidence/claude-security.json {"critical":0,"high":0,"medium":0,"low":0,"report":"..."}  (gate skill writes it)
   analysis/<name>/VERIFICATION.md                                                   (code-modernization)
@@ -24,8 +27,13 @@ import sys
 import xml.etree.ElementTree as ET
 
 import cost_estimate
+import pii_scan
+import scanners
+import sonar
 from forgelib import forge, load_gates, now, read_json, save_state, state, workspace, write_json
 from score import score
+
+BASELINE_CHECKS = ("static", "security", "pii")  # what is meaningful to measure on legacy code
 
 SKIP_DIRS = {"node_modules", ".git", "dist", "build", "target", ".venv", "venv", "bin", "obj", "__pycache__"}
 
@@ -217,44 +225,76 @@ def check_typecheck(root, raw, g):
             "evidence": ["raw/typecheck.log"]}
 
 
-def check_security(root, raw, g):
+_pii = {}
+
+
+def pii_result(ws, root):
+    """One PII/credential scan per gate run, shared by the security and pii checks."""
+    if root not in _pii:
+        _pii[root] = pii_scan.scan(root, pii_scan.config(ws))
+    return _pii[root]
+
+
+def check_security(ws, root, raw, g):
     sev = {"critical": 0, "high": 0, "medium": 0, "low": 0, "secrets": 0}
-    licenses = []
-    ran, notes, ev = [], [], []
+    licenses, findings = [], []
+    ran, notes, ev, errors, how = [], [], [], [], {}
     t = g["timeouts_seconds"]["default"]
-    if has("semgrep"):
-        cfg = " ".join(f"--config {c}" for c in g["scanners"]["semgrep_configs"])
-        run(f'semgrep scan {cfg} --json --metrics=off --quiet -o "{raw / "semgrep.json"}" .', root, raw / "semgrep.log", t)
-        d = read_json(raw / "semgrep.json", {}) or {}
+
+    d, how["semgrep"], err = scanners.semgrep(g, root, raw, t)
+    if err:
+        errors.append(err)
+    else:
         for r in d.get("results", []):
-            s = r.get("extra", {}).get("severity", "INFO")
-            sev[{"ERROR": "high", "WARNING": "medium"}.get(s, "low")] += 1
+            k = {"ERROR": "high", "WARNING": "medium"}.get(r.get("extra", {}).get("severity", "INFO"), "low")
+            sev[k] += 1
+            findings.append({"tool": "semgrep", "severity": k, "file": scanners.rel(r.get("path")),
+                             "line": r.get("start", {}).get("line"), "rule": r.get("check_id", "").split(".")[-1],
+                             "msg": r.get("extra", {}).get("message", "")[:200]})
+        if d.get("errors"):
+            notes.append(f"semgrep reported {len(d['errors'])} error(s) (unparsed files are not scanned; see raw/semgrep.json)")
         ran.append("semgrep"); ev.append("raw/semgrep.json")
+
+    d, how["gitleaks"], err = scanners.gitleaks(g, root, raw, t)
+    if err:
+        errors.append(err)
     else:
-        notes.append("semgrep missing")
-    if has("gitleaks"):
-        out = raw / "gitleaks.json"
-        rc, _ = run(f'gitleaks dir . --report-format json --report-path "{out}" --no-banner --exit-code 0', root, raw / "gitleaks.log", t)
-        if not out.exists():
-            run(f'gitleaks detect --no-git --source . --report-format json --report-path "{out}" --no-banner --exit-code 0', root, raw / "gitleaks.log", t)
-        sev["secrets"] += len(read_json(out, []) or [])
+        for r in d or []:
+            sev["secrets"] += 1
+            findings.append({"tool": "gitleaks", "severity": "critical", "file": scanners.rel(r.get("File")),
+                             "line": r.get("StartLine"), "rule": r.get("RuleID"), "msg": r.get("Description", "secret detected")})
         ran.append("gitleaks"); ev.append("raw/gitleaks.json")
+
+    d, how["trivy"], err = scanners.trivy(g, root, raw, t)
+    if err:
+        errors.append(err)
     else:
-        notes.append("gitleaks missing")
-    if has("trivy"):
-        out = raw / "trivy.json"
-        run(f'trivy fs --scanners {g["scanners"]["trivy_scanners"]} --format json --output "{out}" --quiet .', root, raw / "trivy.log", t)
-        for res in (read_json(out, {}) or {}).get("Results", []) or []:
-            for v in (res.get("Vulnerabilities") or []) + (res.get("Misconfigurations") or []):
+        seen = set()
+        for res in d.get("Results", []) or []:
+            target = scanners.rel(res.get("Target"))
+            for v in res.get("Vulnerabilities") or []:
+                key = (v.get("VulnerabilityID"), v.get("PkgName"), target)
+                if key in seen:
+                    continue
+                seen.add(key)
                 k = v.get("Severity", "LOW").lower()
                 sev[k if k in sev else "low"] += 1
-            sev["secrets"] += len(res.get("Secrets") or [])
+                if k in ("critical", "high"):
+                    findings.append({"tool": "trivy", "severity": k, "file": target, "rule": v.get("VulnerabilityID"),
+                                     "msg": f"{v.get('PkgName')} {v.get('InstalledVersion')} -> fix: {v.get('FixedVersion') or 'none yet'}"})
+            for mc in res.get("Misconfigurations") or []:
+                k = mc.get("Severity", "LOW").lower()
+                sev[k if k in sev else "low"] += 1
+                if k in ("critical", "high"):
+                    findings.append({"tool": "trivy", "severity": k, "file": target, "rule": mc.get("ID"), "msg": mc.get("Title", "")})
+            for s in res.get("Secrets") or []:
+                sev["secrets"] += 1
+                findings.append({"tool": "trivy", "severity": "critical", "file": target, "line": s.get("StartLine"),
+                                 "rule": s.get("RuleID"), "msg": s.get("Title", "secret")})
             for lic in res.get("Licenses") or []:  # licence risk is tracked apart from vulnerability severity
                 if lic.get("Severity") in ("CRITICAL", "HIGH"):
                     licenses.append(f"{lic.get('PkgName') or lic.get('FilePath')}: {lic.get('Name')} ({lic.get('Category')})")
         ran.append("trivy"); ev.append("raw/trivy.json")
-    else:
-        notes.append("trivy missing")
     if (pathlib.Path(root) / "package-lock.json").exists() and has("npm"):
         run("npm audit --json > forge-npm-audit.json", root, raw / "npm-audit.log", t)
         p = pathlib.Path(root) / "forge-npm-audit.json"
@@ -277,11 +317,49 @@ def check_security(root, raw, g):
         for k in ("critical", "high", "medium", "low"):
             sev[k] += int(cs.get(k, 0))
         ran.append("claude-security"); ev.append("raw/claude-security.json")
-    m = dict(sev, scanners_ran=ran, claude_security="present" if cs else "missing",
+    creds = pii_result(ws, root)["creds"]
+    findings += creds
+    m = dict(sev, scanners_ran=ran, scanner_errors=errors, scanner_mode={k: v for k, v in how.items() if v},
+             hardcoded_credentials=len(creds), claude_security="present" if cs else "missing",
              license_violations=len(licenses), license_findings=licenses[:50],
              license_scanned="trivy" in ran and "license" in g["scanners"]["trivy_scanners"])
-    return {"status": "measured" if ran else "skipped", "metrics": m, "evidence": ev,
-            "note": "; ".join(notes) or ""}
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    return {"status": "measured" if ran else "error", "metrics": m, "evidence": ev + ["raw/tool-versions.json"],
+            "findings": sorted(findings, key=lambda f: order.get(f["severity"], 9))[:100],
+            "note": "; ".join(errors + notes)}
+
+
+def check_static(ws, st, root, raw, g, baseline=False):
+    """SonarQube measures + its quality gate for the analysis this run submitted (separate project key for legacy)."""
+    key = f"forge-{st.get('name') or 'run'}" + ("-legacy" if baseline else "")
+    try:
+        d = sonar.scan(g, root, raw, key, g["timeouts_seconds"].get("sonar", 1800))
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as e:
+        return {"status": "error", "note": f"SonarQube: {e}", "evidence": ["raw/sonar-scanner.log"]}
+    ms = d["measures"]
+    num = {"bugs": "bugs", "vulnerabilities": "vulnerabilities", "code_smells": "code_smells",
+           "security_hotspots": "security_hotspots", "duplicated_lines_density": "duplication_pct", "coverage": "coverage_pct",
+           "security_rating": "security_rating", "reliability_rating": "reliability_rating",
+           "sqale_rating": "maintainability_rating", "ncloc": "ncloc"}
+    m = {name: float(ms[k]) for k, name in num.items() if ms.get(k) not in (None, "")}
+    if d.get("quality_gate"):
+        m["quality_gate_failed"] = 1 if d["quality_gate"] == "ERROR" else 0
+    m.update(quality_gate=d.get("quality_gate"), analysis_id=d["analysis_id"], dashboard=d["dashboard"])
+    return {"status": "measured", "metrics": m, "evidence": ["raw/sonar.json"], "findings": d["issues"][:100]}
+
+
+def check_pii(ws, root, raw):
+    r = pii_result(ws, root)
+    if not r["files"]:
+        return {"status": "error", "note": f"PII scan found no readable files under {root}"}
+    write_json(raw / "pii.json", {k: r[k] for k in ("pii", "logs", "allowed")})  # values are masked
+    m = {"pii_findings": len(r["pii"]), "pii_in_logs": len(r["logs"]), "pii_allowed": len(r["allowed"]),
+         "files_scanned": r["files"]}
+    for t in ("ssn", "aadhaar", "pan", "credit_card", "email", "phone", "dob"):
+        m[f"pii_{t}"] = sum(f["rule"] == t for f in r["pii"])
+    return {"status": "measured", "metrics": m, "evidence": ["raw/pii.json"],
+            "findings": (r["pii"] + r["logs"] + r["allowed"])[:100],
+            "note": f"{len(r['allowed'])} finding(s) allowed inline with 'pii-allow:' - review the reasons" if r["allowed"] else ""}
 
 
 def check_behavior(ws, st):
@@ -341,31 +419,58 @@ def check_performance(ws):
                                               "p95_regression_pct": round(100 * (n - b) / b, 2) if b else 0}}
 
 
+def feedback(card, path):
+    """feedback.md: failing checks + top findings (file:line - rule - message), the remediation-engineer's worklist."""
+    md = [f"# Gate feedback - {'baseline' if card.get('baseline') else 'iteration ' + str(card['iteration'])}: "
+          f"{card['verdict']} (overall {card['overall_score']} / min {card['min_overall_score']})", ""]
+    if not card["failures"]:
+        md.append("**All checks passed.**")
+    for f in card["failures"]:
+        c = card["checks"].get(f["check"], {})
+        md += [f"## {f['check']} ({'BLOCKER' if f['required'] else 'warning'})", ""] + [f"- {r}" for r in f["reasons"]]
+        if c.get("findings"):
+            md += ["", "Top findings (file:line - rule [severity] - message):"]
+            md += [f"- {x.get('file')}:{x.get('line') or ''} - {x.get('rule')} [{x.get('severity')}] - {x.get('msg', '')}"
+                   for x in c["findings"][:25]]
+            if len(c["findings"]) > 25:
+                md.append(f"- ... {len(c['findings']) - 25} more in scorecard.json")
+        md.append("")
+    path.write_text("\n".join(md) + "\n", encoding="utf-8")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", help="modernized code root (default: state.modernized_root)")
+    ap.add_argument("--root", help="code root (default: state.modernized_root; with --baseline: state.legacy)")
     ap.add_argument("--only", help="comma list of checks to (re)run; others copied from previous scorecard")
+    ap.add_argument("--baseline", action="store_true",
+                    help="score the legacy code once for the before/after report; never fails, no iteration")
     a = ap.parse_args()
     ws, st, g = workspace(), state(), load_gates()
-    root = pathlib.Path(a.root or st.get("modernized_root") or "").resolve() if (a.root or st.get("modernized_root")) else None
+    default = st.get("legacy") if a.baseline else st.get("modernized_root")
+    root = pathlib.Path(a.root).resolve() if a.root else ((ws / default).resolve() if default else None)
     if not root or not root.is_dir():
-        sys.exit("modernized code root unknown: pass --root or `state.py set modernized_root '\"modernized/<dir>\"'`")
+        sys.exit(f"code root unknown or missing ({root}): pass --root"
+                 + ("" if a.baseline else " or `state.py set modernized_root '\"modernized/<dir>\"'`"))
     gdir = forge(ws) / "gates"
-    prev = read_json(gdir / "latest.json", {}) or {}
-    n = int(st.get("iteration", 0)) + 1
-    it = gdir / f"iteration-{n}"
+    prev = {} if a.baseline else (read_json(gdir / "latest.json", {}) or {})
+    n = int(st.get("iteration", 0)) + (0 if a.baseline else 1)
+    it = gdir / ("baseline" if a.baseline else f"iteration-{n}")
+    if a.baseline and it.exists():
+        shutil.rmtree(it)
     raw = it / "raw"
     raw.mkdir(parents=True, exist_ok=True)
     cs = forge(ws) / "evidence" / "claude-security.json"  # written by the gate skill from /claude-security
-    if cs.exists():
+    if cs.exists() and not a.baseline:
         shutil.copyfile(cs, raw / "claude-security.json")
-    only = set(a.only.split(",")) if a.only else None
+    only = set(a.only.split(",")) if a.only else (set(BASELINE_CHECKS) if a.baseline else None)
     runners = {
         "tests": lambda: check_tests(root, raw, g),
         "coverage": lambda: check_coverage(root, raw, g, st),
         "lint": lambda: check_lint(root, raw, g),
         "typecheck": lambda: check_typecheck(root, raw, g),
-        "security": lambda: check_security(root, raw, g),
+        "static": lambda: check_static(ws, st, root, raw, g, a.baseline),
+        "security": lambda: check_security(ws, root, raw, g),
+        "pii": lambda: check_pii(ws, root, raw),
         "review": lambda: check_review(ws),
         "behavior": lambda: check_behavior(ws, st),
         "database": lambda: check_database(ws, st, root, raw, g),
@@ -374,6 +479,8 @@ def main():
     }
     checks = {}
     for name, fn in runners.items():
+        if a.baseline and name not in only:
+            continue
         if only and name not in only and name in prev.get("checks", {}):
             checks[name] = dict(prev["checks"][name], note="carried over from iteration %s" % prev.get("iteration"))
             continue
@@ -383,8 +490,17 @@ def main():
             checks[name] = {"status": "error", "note": f"{type(e).__name__}: {e}"}
         print(f"  {name:<12} {checks[name]['status']}", flush=True)
     card = {"iteration": n, "iteration_dir": str(it), "generated_at": now(), "root": str(root), "checks": checks}
-    score(card, g)
+    if a.baseline:  # score only what was measured; the verdict is informational
+        card["baseline"] = True
+        score(card, dict(g, checks={k: v for k, v in g["checks"].items() if k in checks}))
+    else:
+        score(card, g)
+    card["feedback"] = str(it / "feedback.md")
+    feedback(card, it / "feedback.md")
     write_json(it / "scorecard.json", card)
+    if a.baseline:
+        print(f"BASELINE {card['verdict']}  overall {card['overall_score']}  -> {it / 'scorecard.json'} (not enforced)")
+        sys.exit(0)
     write_json(gdir / "latest.json", card)
     st["iteration"] = n
     st.setdefault("gate_history", []).append({"iteration": n, "verdict": card["verdict"], "overall": card["overall_score"]})
@@ -392,6 +508,7 @@ def main():
     print(f"VERDICT {card['verdict']}  overall {card['overall_score']} (min {card['min_overall_score']})  -> {it / 'scorecard.json'}")
     for f in card["failures"]:
         print(f"  {'BLOCKER' if f['required'] else 'warn   '} {f['check']}: {'; '.join(f['reasons'])}")
+    print(f"  feedback for remediation: {it / 'feedback.md'}")
     sys.exit(0 if card["verdict"] == "PASS" else 2)
 
 

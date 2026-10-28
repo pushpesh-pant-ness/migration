@@ -20,6 +20,11 @@ user-invocable: false
   - The budget figure, `tokens_total`, is input + output + cache_creation.
   - Cache reads are reported separately. They are cheap and would distort a budget.
 - **USD for tokens:** only when the human sets `cost.usd_per_mtok` in `forge/gates.json`. Prices change and differ by model and plan, so they are never hardcoded.
+- **Exact USD in headless runs** (a Jenkins or CI loop driving `claude -p --output-format json`): pipe each call's output into `cost_estimate.py record-claude --label <step>`. That appends to the script-owned ledger `forge/cost/ledger.jsonl`.
+  - Before each call, `cost_estimate.py check` exits 42 when the run must stop.
+  - `cost_estimate.py remaining` prints the cap to pass as `--max-budget-usd`.
+  - The gate's cost check enforces `checks.cost.max_usd`, `max_calls` and `max_usd_per_call` (0 = none).
+  - A call whose cost could not be read fails the check. Unknown spend is never counted as $0.
 - **Infra:** Infracost on `*.tf` in the legacy and modernized trees. It needs `infracost auth login`. Without IaC, the infra cost is reported as an ESTIMATE and not gated.
 
 ## Projection (plan time and after the pilot)
@@ -31,6 +36,7 @@ The 1.3 covers remediation and re-gating overhead. Before the pilot, give a rang
 ## Budget gate
 - `checks.cost.max_tokens`: 0 means no limit. The script compares `tokens_total` against it.
 - `max_monthly_usd` and `max_monthly_increase_pct` apply to Infracost figures only.
+- `max_usd`, `max_calls` and `max_usd_per_call` apply to the headless-run ledger. For example, 25 / 10 / 5 means $25 total, 10 calls, and $5 per call.
 
 ## Levers, ordered by impact without losing quality
 1. **Scope:** pilot first, and migrate by wave. Don't re-run discovery on unchanged modules.

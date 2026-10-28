@@ -12,7 +12,9 @@ forge/env/env.json:
   {"compose": "forge/env/docker-compose.yml", "project": "forge-<name>",
    "legacy": {"url": "http://localhost:18080", "health": "/"},
    "new":    {"url": "http://localhost:28080", "health": "/health"},
-   "data_services": ["db-legacy", "db-new"], "health_timeout_seconds": 180}
+   "data_services": ["db-legacy", "db-new"], "health_timeout_seconds": 180,
+   "services": {"patient-service": {"legacy": "http://localhost:18081", "new": "http://localhost:28081"}}}
+  "services" is optional: per-service URLs for eval cases with "service": "<name>" (multi-service systems).
 """
 import json
 import shutil

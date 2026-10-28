@@ -1,5 +1,5 @@
 {
-  "_doc": "Default gate thresholds. Copy to <workspace>/forge/gates.json to override per run. A required check that cannot run (tool missing, no data) FAILS - it never passes silently. Verdict is PASS only when every required check passes AND overall_score >= min_overall_score. A file named in $FORGE_GATES_OVERRIDE is merged last (used by CI).",
+  "_doc": "Default gate thresholds. Copy to <workspace>/forge/gates.json to override per run. A required check that cannot run (tool missing, no data) FAILS - it never passes silently, and a threshold whose metric was not measured fails too. Verdict is PASS only when every required check passes AND overall_score >= min_overall_score. A file named in $FORGE_GATES_OVERRIDE is merged last (used by CI).",
   "min_overall_score": 85,
   "max_remediation_iterations": 3,
   "checks": {
@@ -7,11 +7,13 @@
     "coverage":    { "required": true,  "weight": 2, "min_diff_line_pct": 80, "min_line_pct": 70, "_doc": "Gated on changed lines since state.base_ref (diff-cover) when measurable; otherwise on overall line coverage against min_line_pct." },
     "lint":        { "required": false, "weight": 1, "max_errors": 0 },
     "typecheck":   { "required": true,  "weight": 2, "max_errors": 0 },
-    "security":    { "required": true,  "weight": 3, "max_critical": 0, "max_high": 0, "max_secrets": 0, "max_license_violations": 0, "require_claude_security": true, "_license_doc": "Trivy licence findings rated CRITICAL (forbidden, e.g. AGPL) or HIGH (restricted, e.g. GPL). Needs installed deps (node_modules / site-packages) to see transitive licences." },
+    "static":      { "required": true,  "weight": 2, "max_quality_gate_failed": 0, "max_bugs": 0, "max_vulnerabilities": 0, "max_security_hotspots": 5, "max_code_smells": 50, "max_duplication_pct": 5, "max_security_rating": 1, "max_reliability_rating": 1, "max_maintainability_rating": 1, "min_coverage_pct": null, "_doc": "SonarQube Community in Docker (scripts/sonar.py). Ratings: 1 = A ... 5 = E. null disables a threshold; a set threshold whose measure Sonar did not return fails. Sonar's own quality gate ('Sonar way') judges new code only, so on a project's first analysis it passes trivially - the overall measures above are what gate the code. Set min_coverage_pct once the scanner gets a coverage report (scanners.sonar.extra_args)." },
+    "security":    { "required": true,  "weight": 3, "max_critical": 0, "max_high": 0, "max_secrets": 0, "max_hardcoded_credentials": 0, "max_license_violations": 0, "require_claude_security": true, "_license_doc": "Trivy licence findings rated CRITICAL (forbidden, e.g. AGPL) or HIGH (restricted, e.g. GPL). Needs installed deps (node_modules / site-packages) to see transitive licences.", "_doc": "Semgrep + Gitleaks + Trivy (local or Docker, see scanners) + npm audit / pip-audit + hardcoded credentials (scripts/pii_scan.py) + the claude-security summary. A scanner that could not run fails the check." },
+    "pii":         { "required": true,  "weight": 3, "max_pii_findings": 0, "max_pii_in_logs": 0, "_doc": "PII/PHI in code, config and seed data (SSN, Aadhaar, PAN, cards, e-mail, phone, DOB) and PII values written to logs (scripts/pii_scan.py). Fake data: use allowlisted domains (config/pii-allowlist.json) or 'pii-allow: <reason>' on the line; allowed findings are listed and counted as pii_allowed." },
     "review":      { "required": true,  "weight": 2, "max_blocking": 0, "max_major": 5, "_doc": "Code review of the diff since state.base_ref: built-in /code-review + code-modernization architecture-critic (ADR drift). Evidence: forge/evidence/code-review.json" },
     "behavior":    { "required": true,  "weight": 3, "max_not_proven": 0, "max_partly_proven": 0, "min_acceptance_pass_pct": 100 },
     "database":    { "_doc": "applies only when state.db_migration is true (opt-in); otherwise n/a", "required": true,  "weight": 3, "min_row_match_pct": 100, "require_reversible": true, "max_lint_errors": 0 },
-    "cost":        { "required": true,  "weight": 1, "max_tokens": 0, "max_monthly_usd": 0, "max_monthly_increase_pct": 10 },
+    "cost":        { "required": true,  "weight": 1, "max_tokens": 0, "max_monthly_usd": 0, "max_monthly_increase_pct": 10, "max_usd": 0, "max_calls": 0, "max_usd_per_call": 0, "_doc": "0 = no limit. max_tokens: transcript tokens. max_usd / max_calls / max_usd_per_call: the headless-run ledger forge/cost/ledger.jsonl (cost_estimate.py record-claude), e.g. 25 / 10 / 5. A ledger entry whose cost could not be read fails the check." },
     "performance": { "required": false, "weight": 1, "max_p95_regression_pct": 10 }
   },
   "commands": {
@@ -22,9 +24,24 @@
     "typecheck": ""
   },
   "scanners": {
+    "_doc": "prefer: auto (local tool if installed, else Docker) | local | docker. Images: pin a version or digest for reproducible before/after numbers; the digest actually used is recorded in raw/tool-versions.json either way.",
+    "prefer": "auto",
     "semgrep_configs": ["p/default", "p/secrets"],
     "trivy_scanners": "vuln,secret,misconfig,license",
-    "squawk_for_postgres": true
+    "squawk_for_postgres": true,
+    "images": {
+      "semgrep": "semgrep/semgrep:latest",
+      "gitleaks": "ghcr.io/gitleaks/gitleaks:latest",
+      "trivy": "aquasec/trivy:latest",
+      "sonarqube": "sonarqube:community",
+      "sonar_scanner": "sonarsource/sonar-scanner-cli:latest"
+    },
+    "sonar": {
+      "port": 9000,
+      "exclusions": "**/node_modules/**,**/target/**,**/build/**,**/dist/**,**/*.min.js",
+      "extra_args": [],
+      "_doc": "extra_args: scanner properties, e.g. \"-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info\" or \"-Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml\". Java: compiled classes under target/classes or build/classes are found automatically (build first)."
+    }
   },
-  "timeouts_seconds": { "default": 900, "tests": 1800 }
+  "timeouts_seconds": { "default": 900, "tests": 1800, "sonar": 1800 }
 }

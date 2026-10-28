@@ -9,11 +9,11 @@ argument-hint: [auto]  (auto = run the deterministic gate-loop workflow)
 
 1. Run `F state.py phase remediate`. Read `forge/gates/latest.json` and the latest `forge/evidence/gatekeeper-iteration-*.json`.
 2. **Budget.** Count the consecutive FAIL entries at the end of `gate_history` in state. If that count is greater than `max_remediation_iterations`, jump straight to **Escalate**.
-3. **Triage.** Merge the scorecard `failures` (already sorted with blockers first and by weight) with the gatekeeper's `confirmed_failures`. Group them by check, then by file or module.
+3. **Triage.** Merge the scorecard `failures` (already sorted with blockers first and by weight) with the gatekeeper's `confirmed_failures`. Group them by check, then by file or module. `forge/gates/iteration-N/feedback.md` lists the top `file:line - rule - message` findings for each failing check (Sonar issues, Semgrep, Trivy, gitleaks, PII). Give each engineer the part for its group.
 4. **Fix.** Delegate each group to a `remediation-engineer` agent.
    - Groups touching **different files** may run in parallel, in one message.
    - Groups touching the **same files** run one after another.
-   - Order: security, then behavior, then DB, then review, then tests, then types, then coverage, then lint, then cost.
+   - Order: security, then pii, then behavior, then DB, then review, then static, then tests, then types, then coverage, then lint, then cost.
 
    For each security finding, first run `/claude-security` "suggest patches" for that report. Hand the patch file to the engineer to review and adapt.
 5. **Stop if a human is needed.** If any agent returns `needs_human`, stop the loop. Ask the human that question with AskUserQuestion, then continue.

@@ -11,8 +11,9 @@ It **orchestrates** Anthropic's `code-modernization` plugin and adds what that p
 - story → epic/stories/tasks in a local tracker, with Jira CSV export
 - target-stack research with pinned, sourced versions
 - an optional SQL database-migration track with deterministic parity and reversibility proofs
-- behavioral evals
-- a scored quality/security/cost gate that blocks progress
+- behavioral evals: parity with legacy, plus expected-value checks for behavior that changes on purpose
+- a scored quality/security/PII/cost gate that blocks progress (SonarQube, Semgrep, Gitleaks, Trivy and a PII/PHI scanner, all runnable in Docker)
+- a before/after report against a baseline of the legacy code
 - a remediation loop that is not allowed to weaken the checks
 
 ## Install
@@ -20,7 +21,7 @@ Run these in Claude Code (CLI, desktop, or IDE):
 ```
 /plugin marketplace add "C:/path/to/this/folder"        # or a git URL once you push it
 /plugin install migration-forge@migration-forge-marketplace
-/migration-forge:setup                                  # checks semgrep/gitleaks/trivy etc., offers optional companions
+/migration-forge:setup                                  # checks Docker and the scanners, offers optional companions
 ```
 The required dependencies install automatically from `claude-plugins-official`: `code-modernization`, `claude-security`, `security-guidance`, and `context7`.
 
@@ -28,6 +29,7 @@ The required dependencies install automatically from `claude-plugins-official`: 
 - Python ≥ 3.9 (`python3`, `python`, or `py -3`)
 - bash (Git Bash on Windows) for the hooks
 - git
+- Docker (≥ 4 GB RAM): SonarQube always runs in it, and Semgrep/Gitleaks/Trivy run in it unless installed locally. Behind a TLS-inspecting proxy, put the corporate root CA at `~/.migration-forge/corporate-ca.pem`.
 
 For development, run `claude --plugin-dir ./plugins/migration-forge`.
 
@@ -49,9 +51,10 @@ After that, either re-run `/migration-forge:migrate` or use the individual phase
 | Agents | `story-analyst`, `stack-researcher`, `env-provisioner`, `eval-designer`, `gatekeeper` (read-only), `remediation-engineer`, `db-migration-engineer` (only with `--with-db`) |
 | Workflows | `execute-wave` (parallel worktree builds + sequential merge), `gate-loop` (gate → audit → fix → re-gate) |
 | Hooks | `guard` (legacy read-only; script-owned evidence and state; human-owned thresholds; **approvals and `--force` always raise a permission prompt you must click**), `stop_gate` (no stopping on a failing gate while budget remains), `session_brief` |
-| Scripts (stdlib Python) | `state.py`, `tracker.py`, `run_gates.py` + `score.py`, `env.py`, `evals_run.py`, `db_verify.py`, `cost_estimate.py`, `doctor.py` |
-| Config | `gates.json` (thresholds), `stack-catalog.json` (approved families + version policy) |
-| Evals | 5 fast `claude plugin eval` cases + 1 nightly end-to-end pilot (`e2e-pilot-fixture`, tag `e2e`) on the `legacy-shop` fixture (Express 4 + jQuery 1.12 + MySQL 5.7 with planted issues) |
+| Scripts (stdlib Python) | `state.py`, `tracker.py`, `run_gates.py` + `score.py` (+ `scanners.py`, `sonar.py`, `pii_scan.py`), `gate_compare.py`, `env.py`, `evals_run.py` (+ `expect.py`), `db_verify.py`, `cost_estimate.py`, `doctor.py` |
+| Config | `gates.json` (thresholds, scanner images), `pii-allowlist.json` (fake e-mail domains, test card numbers, skipped paths), `stack-catalog.json` (approved families + version policy) |
+| Tests | `tests/test_gates.py`: unit and integration tests for the gate scripts (`python -m unittest discover -s tests`, no Docker needed) |
+| Evals | 5 fast `claude plugin eval` cases + 1 nightly end-to-end pilot (`e2e-pilot-fixture`, tag `e2e`) on the `legacy-shop` fixture (Express 4 + jQuery 1.12 + MySQL 5.7 with planted issues); `patient-service` fixture (Flask, legacy with planted secrets/PII/SQLi vs fixed) for the static/security/PII gates |
 
 ## Workspace a run creates
 ```
@@ -65,14 +68,16 @@ forge/
   decisions/         ADR-001-target-stack.md · target-stack.json · plan.md · cost-report.md · c4/
   db/                inventory.md · strategy.md · map.json · verify.json   (DB track only)
   env/               docker-compose.yml · seed/ · env.json   (legacy :18080 and new :28080, each with its own seeded data)
-  evals/             cases.json · coverage.md · results.json · ui/ (Playwright parity specs + golden screenshots from legacy)
+  evals/             cases.json · coverage.md · results.json · results-legacy.json · ui/ (Playwright parity specs + golden screenshots from legacy)
   evidence/          claude-security.json · gatekeeper-iteration-N.json
-  gates/             iteration-N/{scorecard.json, raw/*} · latest.json
+  gates/             baseline/ (legacy) · iteration-N/{scorecard.json, feedback.md, raw/*} · latest.json · comparison.md
+  cost/              ledger.jsonl   (headless `claude -p` runs: exact USD per call)
   gates.json         (optional) your threshold overrides. Only humans edit it
+  pii-allowlist.json (optional) extra fake domains / test numbers. Only humans edit it
 ```
 
 ## Gate defaults (`config/gates.json`)
-A required check that **cannot run fails**. Nothing passes silently. The verdict is PASS only when every required check passes **and** the overall score is at least 85.
+A required check that **cannot run fails**, and so does a threshold whose metric was not measured. Nothing passes silently. The verdict is PASS only when every required check passes **and** the overall score is at least 85.
 
 | Check | Evidence | Pass when |
 |-------|----------|-----------|
@@ -80,10 +85,12 @@ A required check that **cannot run fails**. Nothing passes silently. The verdict
 | coverage | lcov / Cobertura / JaCoCo (+ diff-cover since `base_ref`); Istanbul / coverage.py summaries for overall only | changed lines ≥ 80% (falls back to overall ≥ 70% when diff coverage can't be measured) |
 | review | built-in `/code-review` + code-modernization `architecture-critic` (ADR drift, ported anti-patterns) on the diff since `base_ref` | 0 blocking, ≤ 5 major |
 | typecheck / lint | tsc, mypy, or the project script / eslint, ruff | 0 errors (lint optional) |
-| security | Semgrep, gitleaks, Trivy (vuln/secret/misconfig/**licence**), npm audit, pip-audit + claude-security verified findings | 0 critical, 0 high, 0 secrets, 0 forbidden/restricted licences |
-| behavior | VERIFICATION.md verdicts + `evals_run.py` against the side-by-side env (golden-master HTTP diff, **Playwright UI parity** that must pass on legacy first, acceptance tests; SQL diff on the DB track) | 0 NOT/PARTLY PROVEN, 100% evals |
+| static | SonarQube Community (Docker) for the analysis this run submitted | quality gate OK, 0 bugs, 0 vulnerabilities, ≤ 5 hotspots, ≤ 50 smells, ≤ 5% duplication, A ratings |
+| security | Semgrep, gitleaks, Trivy (vuln/secret/misconfig/**licence**), npm audit, pip-audit, hardcoded credentials + claude-security verified findings | 0 critical, 0 high, 0 secrets, 0 hardcoded credentials, 0 forbidden/restricted licences; every scanner ran |
+| pii | PII/PHI scanner: SSN, Aadhaar, PAN, cards, e-mail, phone, DOB in code/config/seed data, PII values in logs | 0 findings (inline `pii-allow: <reason>` exceptions are listed and audited) |
+| behavior | VERIFICATION.md verdicts + `evals_run.py` against the side-by-side env (golden-master HTTP diff, **Playwright UI parity** that must pass on legacy first, `http_expect` expected-value cases for intended changes, acceptance tests; SQL diff on the DB track) | 0 NOT/PARTLY PROVEN, 100% evals |
 | database (only with `--with-db`) | `db_verify.py` row counts + order-independent checksums; up/down/up; squawk | 100% match, reversible (n/a when off) |
-| cost | tokens from transcripts; Infracost on IaC | within budget you set |
+| cost | tokens from transcripts; USD ledger for headless `claude -p` runs; Infracost on IaC | within budget you set; no call with unknown cost |
 | performance (opt.) | k6 summary vs legacy | p95 regression ≤ 10% |
 
 The `gatekeeper` agent then audits the evidence itself. It looks for skipped tests, added suppressions, stale coverage files, edited thresholds, and modules not covered. It can turn a PASS into a FAIL.
@@ -91,6 +98,7 @@ The `gatekeeper` agent then audits the evidence itself. It looks for skipped tes
 ## Test the plugin
 ```
 claude plugin validate ./plugins/migration-forge
+cd plugins/migration-forge && python -m unittest discover -s tests -v   # gate scripts, no Docker needed
 cd plugins/migration-forge && claude plugin eval . --scaffold
 ```
 Use `--scaffold` because the cases seed fixture workspaces with the bash scripts in `evals/`.
@@ -102,13 +110,15 @@ claude plugin eval . --scaffold --tag e2e
 Skip it in fast runs by selecting the other cases with `--tag smoke --tag guardrail`. That case sets `EVAL_FORGE_AUTO_APPROVE=1` so approval prompts don't block a headless run. Never set it in a real session.
 
 ## CI
-`/migration-forge:ci` vendors the gate scripts into `.forge-ci/` and writes `.github/workflows/forge-gates.yml`. Azure DevOps or GitLab are available on request. It pins tool versions it fetched at generation time. The pipeline checks out the frozen legacy commit, starts both apps, runs the evals, and runs `run_gates.py` at the same thresholds. Only the checks that need Claude (the claude-security summary, the code review, and token cost) are relaxed, via `.forge-ci/gates.ci.json`. To restore them, enable the optional `claude-evidence` job.
+`/migration-forge:ci` vendors the gate scripts into `.forge-ci/` and writes `.github/workflows/forge-gates.yml`. A `Jenkinsfile` (Docker + Python only on the agent, with an optional headless Claude remediation loop under a USD budget), Azure DevOps or GitLab are available on request. It pins tool versions it fetched at generation time. The pipeline checks out the frozen legacy commit, starts both apps, runs the evals, and runs `run_gates.py` at the same thresholds. Only the checks that need Claude (the claude-security summary, the code review, and token cost) are relaxed, via `.forge-ci/gates.ci.json`. To restore them, enable the optional `claude-evidence` job.
 
 ## Honest limits
 - "Best" is proven per codebase. Run the pilot, read the scorecard, and tune `forge/gates.json`.
 - Changed-line coverage needs `diff-cover` and an lcov or XML report. Path mapping between the report and git can differ by stack, so check `raw/diff-cover.json` on the first gate. If it can't be measured, the gate says so and falls back to overall coverage.
 - The `review` and claude-security counts are produced by a model. The gatekeeper cross-checks them against the findings list, but they are not deterministic.
 - Lint and typecheck error counts from custom scripts are approximate (exit code plus a pattern count).
+- The PII scanner is pattern-based (with Luhn/Verhoeff/issuer checks): it finds identifiers and PII passed to loggers, not names or free-text addresses. Add an ML-based scanner such as Microsoft Presidio if you need those.
+- Scanner images default to `:latest`. The digest actually used is recorded in `raw/tool-versions.json`, but pin versions in `gates.json` when before/after numbers must be comparable.
 - DB checksums compare normalized values across engines. Exotic types (spatial, custom domains) may need an entry in `map.json` with a reason.
 - Infra cost is gated only when IaC and Infracost exist. Otherwise it is a labeled estimate.
 - Token USD is never hardcoded. Set `cost.usd_per_mtok` yourself.

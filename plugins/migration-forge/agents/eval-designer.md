@@ -24,6 +24,7 @@ You make "it works the same" measurable. Start by reading `${CLAUDE_PLUGIN_ROOT}
 - Every user-facing flow in a P0 or P1 story gets a `ui_e2e` Playwright case. A spec must pass on legacy, or it is invalid. Give P0 screens `visual: true` unless the story redesigns them. Set up `forge/evals/ui/` from the skill's assets.
 - Set `"mutates": true` on any case that writes data, so the seeded env is reset first.
 - Each endpoint group gets golden-master `http_diff` cases with realistic payloads taken from fixtures or logs, never from production PII. List volatile fields in `ignore` only with a reason.
+- Behavior the stories change **on purpose** gets `http_expect` cases with stated expected values, never an `ignore` on a parity case. That covers security fixes (an injection attempt answered with 400/404, 401/403 on missing auth), PII rules (`"*.ssn": {"absent": true}` over every record), and new validation. Use `"service"` when the system has several services.
 - Money, dates and time zones, rounding, nulls, unicode, pagination edges, authorization failures, concurrency/idempotency. Add the relevant ones per rule, from the catalogue in the skill.
 - Never write a case that can't fail. Never assert on implementation details.
 

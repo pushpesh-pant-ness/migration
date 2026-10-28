@@ -19,6 +19,23 @@ user-invocable: false
    "command":"npx jest -t \"STORY-004\"","cwd":"modernized/shop-web"}
 ]}
 ```
+An **expected-behavior** case (`http_expect`) checks the new app against stated values instead of legacy output. Use it for behavior that changes on purpose, where legacy is the bug and parity can't express it: security fixes, PII rules, new validation, and contract rules from the story.
+```json
+{"id":"EV-030","story":"STORY-007","rule":"PII-1","priority":"P0","type":"http_expect","service":"patient-service",
+ "request":{"method":"GET","path":"/patients"},
+ "expect":{"status":200,"json":{"*.ssn":{"absent":true},"0.id":{"exists":true}},"max_ms":800}},
+{"id":"EV-031","story":"STORY-007","priority":"P0","type":"http_expect","mutates":true,
+ "request":{"method":"POST","path":"/patients","body":{"name":"Eval","email":"eval@example.com"}},
+ "expect":{"status":201,"json":{"id":{"exists":true}}},"save":{"new_id":"id"}},
+{"id":"EV-032","story":"STORY-007","priority":"P1","type":"http_expect",
+ "request":{"path":"/patients/{{new_id}}"},"expect":{"status":200,"json":{"name":"Eval"}}}
+```
+- **json operators:** equals, `exists`, `absent`, `type`, `min_len`, `contains`, `gt`, `regex`.
+- **Paths:** `0.id` checks the first item only. `*.ssn` checks **every** item, and fails when the list is empty.
+- **Chaining:** `save` values are available to later cases as `{{name}}`. Cases run in file order, so a chained case also needs its `save` case when you use `--only`.
+- **Baseline:** `evals_run.py --against legacy` runs only the `http_expect` cases on legacy into `results-legacy.json`. That file is for the before/after report, not the gate.
+- **Multi-service systems:** `"service": "<name>"` takes its legacy and new URLs from `forge/env/env.json` → `"services": {"<name>": {"legacy": "...", "new": "..."}}`. This works for `http_diff` too.
+
 A UI case looks like this:
 ```json
 {"id":"EV-020","story":"STORY-002","priority":"P0","type":"ui_e2e","spec":"orders.spec.ts","grep":"STORY-002","visual":true,"mutates":false}
@@ -44,6 +61,7 @@ Header values expand `${ENV_VAR}` at run time, so secrets such as test tokens st
 3. Every endpoint group gets http_diff golden masters built from realistic fixtures. **No production PII.** Synthesize the data, or mask it.
 4. Every report or aggregate query, and every stored procedure being moved into code, gets an sql_diff.
 5. `ignore` is allowed only for truly nondeterministic fields, and each one needs a `why_ignored`.
+5a. Every behavior a story changes on purpose gets an `http_expect` case instead of an `ignore` on the parity case. That covers every security fix (injection answered with 400/404, auth failures) and every PII rule (`*.<field>` absent). Every P0 security or PII rule needs at least one.
 6. The `coverage.md` matrix lists rule/AC → case ids, and every gap is listed explicitly.
 
 ## Edge-case catalogue

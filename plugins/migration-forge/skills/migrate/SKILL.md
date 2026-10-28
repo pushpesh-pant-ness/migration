@@ -38,7 +38,7 @@ Run each phase by following its skill. Before every phase, run `F state.py phase
 | 6 | gate ⇄ remediate | `/migration-forge:gate`, `/migration-forge:remediate` | automatic. Escalates after `max_remediation_iterations` |
 | 7 | verify | `/code-modernization:modernize-verify <name>`, then the gate again | |
 | 8 | harden | `/code-modernization:modernize-harden <name>`, then the gate again | **approve release** |
-| 9 | done | `F tracker.py export-jira`, final report | |
+| 9 | done | `F tracker.py export-jira`, `F gate_compare.py` (before/after vs the legacy baseline from discover), final report | |
 
 **DB track off** (`db_migration` false or missing in state):
 - Skip every `db-migration-engineer` step, the data-migration and cutover-DB stories, and DB evidence. The database gate check is n/a.

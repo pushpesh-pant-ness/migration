@@ -12,20 +12,29 @@ Case types:
   ui_e2e    {"spec": "checkout.spec.ts", "grep": "STORY-004", "visual": false}     Playwright spec in
             forge/evals/ui/ run against legacy first (must pass there, else the case is invalid), then
             against the new app. visual=true: screenshots recorded from legacy are the golden images.
+  http_expect {"request": {...}, "expect": {"status": 200, "json": {"*.ssn": {"absent": true}}}, "save": {"id": "id"}}
+            expected values checked on the NEW app only (see expect.py) - for behavior that changes on purpose
+            (security/PII fixes, where legacy is the bug) and contract rules. Cases run in file order; values in
+            `save` are available to later cases as {{name}}.
 Every case: {"id": "EV-001", "story": "STORY-001", "priority": "P0", "rule": "BR-12", "type": ...,
-             "mutates": false}   mutates=true -> env.py reset before the case (same seed for both apps)
+             "mutates": false, "service": "patient-service"}
+             mutates=true -> env.py reset before the case (same seed for both apps)
+             service -> URLs from env.json "services" (multi-service systems); omitted -> the top-level legacy/new
 App URLs: $FORGE_LEGACY_URL / $FORGE_NEW_URL, else forge/env/env.json (see env.py).
 
   evals_run.py [--only EV-001,EV-007] [--timeout 300]
+  evals_run.py --against legacy      # http_expect cases on legacy -> results-legacy.json (baseline, not a gate input)
 """
 import argparse
 import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
+import expect as X
 from forgelib import forge, now, read_json, workspace, write_json
 
 
@@ -51,15 +60,19 @@ def http(base, req):
         headers.setdefault("Content-Type", "application/json")
     r = urllib.request.Request(base.rstrip("/") + req["path"], data=data, headers=headers,
                                method=req.get("method", "GET"))
+    t = time.perf_counter()
     try:
-        with urllib.request.urlopen(r, timeout=60) as resp:
-            return resp.status, resp.read().decode("utf-8", "replace")
+        with urllib.request.urlopen(r, timeout=req.get("timeout", 60)) as resp:
+            return resp.status, resp.read().decode("utf-8", "replace"), (time.perf_counter() - t) * 1000
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode("utf-8", "replace")
+        return e.code, e.read().decode("utf-8", "replace"), (time.perf_counter() - t) * 1000
 
 
-def app_urls():
+def app_urls(service=None):
     env = read_json(forge() / "env" / "env.json", {}) or {}
+    if service:
+        s = (env.get("services") or {}).get(service) or {}
+        return s.get("legacy"), s.get("new")
     return (os.environ.get("FORGE_LEGACY_URL") or (env.get("legacy") or {}).get("url"),
             os.environ.get("FORGE_NEW_URL") or (env.get("new") or {}).get("url"))
 
@@ -67,11 +80,28 @@ def app_urls():
 NO_URLS = "app URLs unknown: run /migration-forge:env (or set FORGE_LEGACY_URL / FORGE_NEW_URL)"
 
 
+def run_expect(c, saved, side="new"):
+    old, new = app_urls(c.get("service"))
+    base = old if side == "legacy" else new
+    if not base:
+        return False, NO_URLS + (f" (service {c['service']!r} needs an entry in env.json services)" if c.get("service") else "")
+    req = X.subst(c["request"], saved)
+    status, text, ms = http(base, req)
+    try:
+        body = json.loads(text)
+    except json.JSONDecodeError:
+        body = X.MISSING
+    errs = X.check(c.get("expect") or {}, status, body, text, ms)
+    if not errs and body is not X.MISSING:
+        saved.update({k: X.get_path(body, p) for k, p in (c.get("save") or {}).items()})
+    return not errs, f"{ms:.0f}ms" if not errs else "; ".join(errs)
+
+
 def run_http(c):
-    old, new = app_urls()
+    old, new = app_urls(c.get("service"))
     if not old or not new:
         return False, NO_URLS
-    (s1, b1), (s2, b2) = http(old, c["request"]), http(new, c["request"])
+    (s1, b1, _), (s2, b2, _) = http(old, c["request"]), http(new, c["request"])
     try:
         j1, j2 = json.loads(b1), json.loads(b2)
         for p in c.get("ignore", []):
@@ -138,33 +168,44 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only")
     ap.add_argument("--timeout", type=int, default=300)
+    ap.add_argument("--against", choices=["new", "legacy"], default="new",
+                    help="legacy: run only http_expect cases against the legacy app (baseline for the before/after report)")
     a = ap.parse_args()
     ws = workspace()
     spec = read_json(forge(ws) / "evals" / "cases.json") or sys.exit("forge/evals/cases.json missing (eval-designer writes it)")
     only = set(a.only.split(",")) if a.only else None
-    prev = {c["id"]: c for c in (read_json(forge(ws) / "evals" / "results.json", {}) or {}).get("cases", [])}
-    out = []
+    result_file = forge(ws) / "evals" / ("results.json" if a.against == "new" else "results-legacy.json")
+    prev = {c["id"]: c for c in (read_json(result_file, {}) or {}).get("cases", [])}
+    out, saved = [], {}
     for c in spec["cases"]:
+        kind = c.get("type", "command")
+        if a.against == "legacy" and kind != "http_expect":
+            continue
         if only and c["id"] not in only:
             if c["id"] in prev:
                 out.append(prev[c["id"]])
             continue
-        kind = c.get("type", "command")
+        reset_failed = None
         if c.get("mutates") and (forge(ws) / "env" / "env.json").exists():
-            subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.py"), "reset"],
-                           cwd=ws, capture_output=True)
+            r = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.py"), "reset"],
+                               cwd=ws, capture_output=True, text=True)
+            reset_failed = r.returncode and f"env.py reset failed (rc={r.returncode}), so the seeded data is not known: {r.stdout[-200:]}"
         try:
-            ok, detail = {"command": lambda: run_cmd(c, ws, a.timeout), "http_diff": lambda: run_http(c),
-                          "sql_diff": lambda: run_sql(c), "ui_e2e": lambda: run_ui(c, ws, a.timeout)}[kind]()
+            if reset_failed:
+                ok, detail = False, reset_failed
+            else:
+                ok, detail = {"command": lambda: run_cmd(c, ws, a.timeout), "http_diff": lambda: run_http(c),
+                              "http_expect": lambda: run_expect(c, saved, a.against),
+                              "sql_diff": lambda: run_sql(c), "ui_e2e": lambda: run_ui(c, ws, a.timeout)}[kind]()
         except Exception as e:  # an eval that crashes is a failed eval
             ok, detail = False, f"{type(e).__name__}: {e}"
         out.append({"id": c["id"], "story": c.get("story"), "rule": c.get("rule"), "priority": c.get("priority", "P2"),
                     "type": kind, "passed": bool(ok), "detail": detail})
-        print(f"{'PASS' if ok else 'FAIL'} {c['id']:<8} {kind:<9} {c.get('story') or ''} {'' if ok else detail[:160]}", flush=True)
-    write_json(forge(ws) / "evals" / "results.json", {"run_at": now(), "cases": out})
+        print(f"{'PASS' if ok else 'FAIL'} {c['id']:<8} {kind:<11} {c.get('story') or ''} {'' if ok else detail[:160]}", flush=True)
+    write_json(result_file, {"run_at": now(), "against": a.against, "cases": out})
     failed = [c for c in out if not c["passed"]]
     print(f"{len(out) - len(failed)}/{len(out)} passed")
-    sys.exit(0 if not failed else 2)
+    sys.exit(0 if not failed or a.against == "legacy" else 2)
 
 
 if __name__ == "__main__":

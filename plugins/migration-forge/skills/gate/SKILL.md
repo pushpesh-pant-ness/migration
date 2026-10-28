@@ -1,5 +1,5 @@
 ---
-description: Run the migration quality gate - tests, coverage, types, lint, security (Semgrep, gitleaks, Trivy, dependency audits, claude-security verified scan), behavioral evals, database parity/reversibility, cost and optional performance - score it against thresholds, and have the gatekeeper audit the evidence. Proceed only on PASS. Use after any build/remediation step or when the user asks to check quality, security, cost or evals.
+description: Run the migration quality gate - tests, coverage, types, lint, SonarQube static analysis, security (Semgrep, gitleaks, Trivy, dependency audits, hardcoded credentials, claude-security verified scan), PII/PHI, behavioral evals, database parity/reversibility, cost and optional performance - score it against thresholds, and have the gatekeeper audit the evidence. Proceed only on PASS. Use after any build/remediation step or when the user asks to check quality, security, PII, cost or evals.
 argument-hint: [--only tests,security,...]
 ---
 
@@ -29,7 +29,9 @@ argument-hint: [--only tests,security,...]
      2. Run `F evals_run.py`: all cases (http_diff, ui_e2e, command, plus sql_diff on the DB track), every gate.
    - **Database** (only when `db_migration` is true): if any migration or transform changed since `forge/db/verify.json` was written, run the `db-migration-engineer` agent in **verify** mode first. When the track is off, the database check reports n/a and is excluded from the score.
    - **Performance** (optional): if `forge/perf/k6-legacy.json` exists, run the same k6 script against the new system with `k6 run --summary-export forge/perf/k6-modernized.json <script>`.
-3. **Score.** Run `F run_gates.py` (pass `$ARGUMENTS` through to `--only`, if given). It prints the verdict and writes `forge/gates/iteration-N/scorecard.json`. Exit code 0 means PASS and 2 means FAIL.
+3. **Score.** Run `F run_gates.py` (pass `$ARGUMENTS` through to `--only`, if given). It prints the verdict and writes `forge/gates/iteration-N/scorecard.json` plus `feedback.md` (failing checks with their top `file:line` findings). Exit code 0 means PASS and 2 means FAIL.
+   - The scanners run locally when installed, otherwise as Docker images. SonarQube (`static`) always runs in Docker: the first run starts the `forge-sonarqube` container, which takes 2–5 minutes and needs about 4 GB RAM. `F sonar.py down` stops it when the run is paused.
+   - A scanner that cannot run fails its check, and so does a threshold whose metric was not measured. Fix the tool (`F doctor.py`); never relax the threshold to get past it.
 4. **Audit.** Delegate to the `gatekeeper` agent, then save its JSON to `forge/evidence/gatekeeper-iteration-<N>.json`.
 5. **Decide.**
    - **PASS:** both the scorecard and the gatekeeper must say PASS. Report the table below. If the current phase is verify or harden, move forward. Otherwise close the tickets in review as the `/migration-forge:tracker` "Closing a ticket" rules describe.
@@ -42,8 +44,12 @@ Gate iteration N — VERDICT (overall X / min Y)   gatekeeper: PASS|FAIL
 check        req  status   score  detail
 tests        ✔    pass     100    412/412
 coverage     ✔    FAIL      91    72.4% < 80%
+static       ✔    pass     100    Sonar A/A/A, 0 bugs, 2 hotspots
+pii          ✔    FAIL      80    1 pii finding(s): ssn in seed/patients.sql:4
 ...
 Blockers: <top 3 with evidence paths>
+Feedback: forge/gates/iteration-N/feedback.md
 ```
+If `forge/gates/baseline/` exists, also run `F gate_compare.py` and add its "Improved / Regressed" line to the report.
 
 Thresholds come from `${CLAUDE_PLUGIN_ROOT}/config/gates.json`, overridden by `forge/gates.json`. Only the human changes them. If the human asks you to relax a threshold, tell them to edit `forge/gates.json` themselves, and record the decision in `forge/decisions/`.
