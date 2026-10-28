@@ -18,6 +18,6 @@
 - `TINYINT(1)` isn't always boolean. Check with `SELECT DISTINCT col`.
 - `utf8` (3-byte) vs `utf8mb4`: emoji and 4-byte characters may already be mangled in the source. Compare checksums on a sample before trusting the data.
 - Case-insensitive default collations: unique keys may treat 'A' and 'a' as duplicates. On a case-sensitive target, both might be inserted.
-- `GROUP BY` with non-aggregated columns (when ONLY_FULL_GROUP_BY was off) gives nondeterministic results. Port these to explicit aggregates, and cover them with `sql_diff` cases where `ordered` is false.
+- `GROUP BY` with non-aggregated columns (when ONLY_FULL_GROUP_BY was off) gives nondeterministic results. Port these to explicit aggregates, and cover them with order-independent result checks (tests or Jenkins evals).
 - `ON UPDATE CURRENT_TIMESTAMP` columns: emulate them with a trigger or in the app. Exclude them from db_verify only if they get rewritten during the copy, and give a reason.
 - `LIMIT x,y` becomes `OFFSET/FETCH` or `LIMIT … OFFSET`. Backtick identifiers become standard double quotes.

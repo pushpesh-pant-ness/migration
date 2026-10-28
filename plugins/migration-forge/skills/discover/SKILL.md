@@ -20,7 +20,6 @@ Read `<name>`, `repo`, and `target` from `F state.py show`. Then run `F state.py
 4. **Run these together.** In a single message, delegate:
    - the `stack-researcher` agent in *current-stack inventory only* mode. It confirms the exact current versions and their EOL status, and does **not** propose a target yet. It writes `forge/decisions/current-stack.md`.
    - optional: `/claude-security` "scan codebase" on `legacy/<name>`, as a **baseline**. The point is to know which vulnerabilities must not be carried over. Save its summary as `forge/evidence/legacy-security-baseline.json`.
-   - **Deterministic baseline** of the legacy code: `F run_gates.py --baseline`. It runs the `static` (SonarQube), `security` and `pii` checks on `legacy/<name>` in Docker, writes `forge/gates/baseline/`, and never fails. Feed its top findings into the security-hardening story. Every later gate can then be compared with `F gate_compare.py`, which produces the before/after report.
 5. **Refine the backlog.** Run the `story-analyst` agent in refinement pass mode. It reads all of the above, adds module stories mapped to BR ids, and records `blocked_by` edges. Then run `F tracker.py validate`, which must exit 0, and `F tracker.py board`.
 6. **Close out.** Tick the items you completed in `forge/tracker/checklists/discovery.md`. Commit. Then report in at most 15 lines:
    - module count

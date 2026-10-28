@@ -63,21 +63,10 @@ def _merge_two(a, b):
     return out
 
 
-def load_gates(ws=None):
-    """Plugin defaults deep-merged with an optional workspace override at forge/gates.json."""
-    base = read_json(PLUGIN_ROOT / "config" / "gates.json", {})
-    override = read_json(forge(ws) / "gates.json", {}) or {}
-    extra = os.environ.get("FORGE_GATES_OVERRIDE")  # e.g. CI profile without model-produced evidence
-    if extra:
-        override = _merge_two(override, read_json(extra, {}) or {})
-
-    def merge(a, b):
-        out = dict(a)
-        for k, v in b.items():
-            out[k] = merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
-        return out
-
-    return merge(base, override)
+def load_settings(ws=None):
+    """Plugin defaults (config/settings.json) deep-merged with an optional workspace override at forge/settings.json."""
+    base = read_json(PLUGIN_ROOT / "config" / "settings.json", {})
+    return _merge_two(base, read_json(forge(ws) / "settings.json", {}) or {})
 
 
 def state(ws=None):

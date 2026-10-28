@@ -24,10 +24,10 @@ Map `$ARGUMENTS` to a `T` subcommand. `export` means `export-jira`, and no argum
   - Store each Jira key with `T set <ID> --labels <existing>,jira:<KEY>`.
   - Never delete remote issues.
 
-## Closing a ticket (after a PASS gate)
+## Closing a ticket (after a PASS from Jenkins)
 - **review → done** requires all of these:
-  - the latest scorecard says PASS
-  - the latest `forge/evidence/gatekeeper-iteration-N.json` says PASS
-  - the ticket's eval cases pass in `forge/evals/results.json`
-- **Ticking boxes:** edit the ticket body and change `- [ ]` to `- [x]`. Put the proof inline, for example `(evidence: forge/gates/iteration-3/scorecard.json PASS; EV-004 passed)`. Tick a box only when you have read that proof on disk.
+  - `forge/gates/latest.json` says PASS, with `source` jenkins
+  - its `head` is the current commit (`git rev-parse HEAD`), or an ancestor that already contains this ticket's work, and `workspace_dirty` is false
+  - the ticket's acceptance tests pass
+- **Ticking boxes:** edit the ticket body and change `- [ ]` to `- [x]`. Put the proof inline, for example `(evidence: forge/gates/iteration-3/verdict.json PASS, build #42, commit abc1234)`. Tick a box only when you have read that proof on disk.
 - Then run `T move <ID> done --note "<evidence>"`.

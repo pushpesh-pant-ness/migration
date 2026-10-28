@@ -31,13 +31,13 @@ If the project has no SQL database at all, run `state.py set has_database false`
 - Make migrations idempotent where the tool allows.
 - Never edit an already-applied migration. Add a new one.
 
-**verify.** Produce evidence. The gate reads `forge/db/verify.json`, which only these commands write:
+**verify.** Produce evidence. `forge/db/verify.json` is the DB track's proof, and only these commands write it:
 1. Reversibility, on a DISPOSABLE database only (for example `docker run --rm -d -e POSTGRES_PASSWORD=x -p 55432:5432 postgres:<pinned>`):
    `FORGE_SCRATCH_DB_URL=… bash "${CLAUDE_PLUGIN_ROOT}/scripts/py.sh" db_verify.py reversibility --up "<migrate cmd>" --down "<undo cmd>"`
 2. Data parity, after the data copy into a target copy:
    `bash "${CLAUDE_PLUGIN_ROOT}/scripts/py.sh" db_verify.py compare --map forge/db/map.json`
    This needs `FORGE_SOURCE_DB_URL` and `FORGE_TARGET_DB_URL`.
-3. Postgres targets: lint the migrations with `squawk` (run_gates also runs it).
+3. Postgres targets: lint the migrations with `squawk`.
 
 ## Hard rules
 - Credentials live only in environment variables. Never write a URL with a password to any file, log, or ticket.

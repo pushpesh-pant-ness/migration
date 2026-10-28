@@ -47,16 +47,16 @@ Highest-risk pairs. The per-engine references have more detail.
 | BLOB | VARBINARY(MAX) | BYTEA | size |
 | `''` vs NULL | | | Oracle treats `''` as NULL |
 
-Case sensitivity: MySQL and SQL Server collations are usually case-insensitive, and Postgres is case-sensitive. Add `sql_diff` eval cases for every `WHERE` on text that users type.
+Case sensitivity: MySQL and SQL Server collations are usually case-insensitive, and Postgres is case-sensitive. Cover every `WHERE` on text that users type with a test or a Jenkins eval case.
 
 ## 5. Procedural code
 Stored procedures, triggers, and functions either move into application code, which is preferred for testability, or get ported (T-SQL / PL/SQL → PL/pgSQL). Each one needs a business-rule id and an eval case. Tools: ora2pg (Oracle), AWS SCT, and the SQL Server Migration Assistant for the assessment.
 
-## 6. Evidence (the gate reads `forge/db/verify.json`)
+## 6. Evidence (`forge/db/verify.json`, attached to the DB tickets)
 1. `db_verify.py reversibility`: run on a disposable container DB. It proves down restores the schema and up is repeatable.
 2. `db_verify.py compare --map forge/db/map.json`: per-table row count plus an order-independent checksum over normalized values. The target is 100%.
-3. squawk for Postgres migrations. run_gates runs it.
-4. `sql_diff` eval cases for reports and aggregates, which the eval-designer writes.
+3. squawk for Postgres migrations.
+4. Result-equality checks for reports and aggregates. Ask the Jenkins pipeline owners to add them to the evals.
 
 Secrets: connection URLs live only in environment variables (`FORGE_SOURCE_DB_URL`, `FORGE_TARGET_DB_URL`, `FORGE_SCRATCH_DB_URL`).
 

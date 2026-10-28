@@ -13,4 +13,4 @@ Migration Forge does **not vendor** third-party skills or agents. It orchestrate
 | Trail of Bits skills | trailofbits/skills | CC-BY-SA-4.0 | optional, installed as plugins only, never copied or modified |
 | framework-migration, c4-architecture, database-migrations | wshobson/agents | MIT | optional |
 
-External tools that the gates invoke, locally if installed or as their published Docker images: Semgrep, gitleaks, Trivy, SonarQube Community Build and sonar-scanner-cli (always Docker), plus npm audit, pip-audit, squawk, Infracost, k6 when installed. Images are pulled at run time, never redistributed. Each is under its own licence.
+External tools the scripts invoke if they are installed: squawk, Infracost, and the database drivers for db_verify.py. Each is under its own licence. The quality-gate scanners run in the team's Jenkins pipeline, not in this plugin.

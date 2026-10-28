@@ -7,7 +7,7 @@
     {
       "name": "migration-forge",
       "source": "./plugins/migration-forge",
-      "description": "Story + repo in, gated modernization out: local Jira-style backlog, stack research, SQL DB migration, quality/security/cost/eval gates with auto-remediation",
+      "description": "Story + repo in, gated modernization out: local Jira-style backlog, stack research, SQL DB migration, remediation driven by the Jenkins quality-gate verdict",
       "version": "0.1.0",
       "category": "development"
     }

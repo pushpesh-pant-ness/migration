@@ -1,27 +1,27 @@
 # Migration Forge
 
-A Claude Code plugin you install and run. You give it **a story and a legacy repo** (frontend, backend, and a SQL DB). It produces a **gated, verified migration** to a current stack, plus a local Jira-style backlog.
+A Claude Code plugin you install and run. You give it **a story and a legacy repo** (frontend, backend, and a SQL DB). It produces a **migration to a current stack** that your **Jenkins quality-gate pipeline** must pass, plus a local Jira-style backlog.
 
 ```
-story + repo ─► intake ─► discover ─► plan-stack ─► plan-migration ─► execute (pilot → waves) ─► gate ⇄ remediate ─► verify ─► harden ─► done
-                 ✋ approve     (review)     ✋ approve       ✋ approve          ✋ "continue" after pilot     auto, max 3 tries     gate      gate ✋ release
+story + repo ─► intake ─► discover ─► plan-stack ─► plan-migration ─► execute (pilot → waves) ─► Jenkins gate ⇄ remediate ─► verify ─► harden ─► done
+                 ✋ approve     (review)     ✋ approve       ✋ approve          ✋ "continue" after pilot      auto, max 3 tries          gate      gate ✋ release
 ```
 
 It **orchestrates** Anthropic's `code-modernization` plugin and adds what that plugin doesn't cover:
 - story → epic/stories/tasks in a local tracker, with Jira CSV export
 - target-stack research with pinned, sourced versions
 - an optional SQL database-migration track with deterministic parity and reversibility proofs
-- behavioral evals: parity with legacy, plus expected-value checks for behavior that changes on purpose
-- a scored quality/security/PII/cost gate that blocks progress (SonarQube, Semgrep, Gitleaks, Trivy and a PII/PHI scanner, all runnable in Docker)
-- a before/after report against a baseline of the legacy code
-- a remediation loop that is not allowed to weaken the checks
+- a hand-off to the Jenkins pipeline: it imports the pipeline's quality-gate verdict for each commit, and tickets, phases and remediation follow that verdict
+- a remediation loop that fixes what Jenkins reports, and is not allowed to weaken the checks
+
+**The quality gates and behavioral evals run in the Jenkins pipeline, not in this plugin.** That covers static analysis, security, secrets/PII, cost budget and functional evals. Their thresholds belong to the pipeline owners.
 
 ## Install
 Run these in Claude Code (CLI, desktop, or IDE):
 ```
 /plugin marketplace add "C:/path/to/this/folder"        # or a git URL once you push it
 /plugin install migration-forge@migration-forge-marketplace
-/migration-forge:setup                                  # checks Docker and the scanners, offers optional companions
+/migration-forge:setup                                  # checks tools, sets up the Jenkins result URL, offers optional companions
 ```
 The required dependencies install automatically from `claude-plugins-official`: `code-modernization`, `claude-security`, `security-guidance`, and `context7`.
 
@@ -29,7 +29,7 @@ The required dependencies install automatically from `claude-plugins-official`: 
 - Python ≥ 3.9 (`python3`, `python`, or `py -3`)
 - bash (Git Bash on Windows) for the hooks
 - git
-- Docker (≥ 4 GB RAM): SonarQube always runs in it, and Semgrep/Gitleaks/Trivy run in it unless installed locally. Behind a TLS-inspecting proxy, put the corporate root CA at `~/.migration-forge/corporate-ca.pem`.
+- access to the Jenkins pipeline's build artifacts. For a private Jenkins, set `JENKINS_USER` and `JENKINS_TOKEN` in your environment.
 
 For development, run `claude --plugin-dir ./plugins/migration-forge`.
 
@@ -38,23 +38,34 @@ Open an **empty workspace folder**, not the legacy repo, and run:
 ```
 /migration-forge:migrate story.md ../legacy-repo "react+nestjs"
 ```
-**Database migration is optional and off by default.** By default the existing database is kept exactly as it is, and the new backend connects to the unchanged schema. The gatekeeper fails any DDL added while the track is off.
-- To turn the DB track on (schema/data/engine changes, `db_verify` parity and reversibility, the database gate), add `--with-db`.
+**Database migration is optional and off by default.** By default the existing database is kept exactly as it is, and the new backend connects to the unchanged schema.
+- To turn the DB track on (schema/data/engine changes, `db_verify` parity and reversibility), add `--with-db`.
 - To turn it on mid-run, use `state.py set db_migration true`.
 After that, either re-run `/migration-forge:migrate` or use the individual phase commands: `intake`, `discover`, `plan-stack`, `plan-migration`, `execute`, `gate`, `remediate`, `status`, and `tracker`.
+
+## How the Jenkins gate fits in
+1. `execute` builds a ticket test-first, commits, and moves the ticket to review.
+2. `/migration-forge:gate` makes sure Jenkins builds that commit. You push, or start the build. When it finishes, `jenkins_result.py import <summary.json path or URL> --commit <sha>` records the verdict in `forge/gates/iteration-N/` and `forge/gates/latest.json`.
+   - The location defaults to `jenkins.results_url` in `forge/settings.json`.
+   - It reads the pipeline's `results/<phase>/summary.json`, plus the `gate*.json` files and `feedback.md` next to it.
+   - The verdict is PASS only when the phase was enforced, every gate passed, and no check was skipped.
+   - It refuses a baseline phase, a result already imported, and a result for a different commit.
+3. **PASS:** tickets close (`/migration-forge:tracker` rules: PASS for the commit that contains the work). **FAIL:** `/migration-forge:remediate` hands each failing gate's `file:line` findings from `feedback.md` to `remediation-engineer` agents. It then commits the fix and goes back to step 2.
+   - The Stop hook keeps the session working on a FAIL until a fix is committed, then lets it wait for the next build.
+   - It escalates after `max_remediation_iterations` (settings) or two identical failures in a row.
 
 ## What's inside (`plugins/migration-forge/`)
 | Kind | Items |
 |------|-------|
-| Skills: user commands | `migrate` (orchestrator), `intake`, `discover`, `plan-stack`, `plan-migration`, `env` (side-by-side runtime), `execute`, `gate`, `remediate`, `ci` (generate a pipeline that enforces the gate), `status`, `tracker`, `setup` |
-| Skills: model knowledge | `sql-db-migration` (+ Postgres/MySQL/SQL Server refs), `migration-evals`, `cost-assessment` |
-| Agents | `story-analyst`, `stack-researcher`, `env-provisioner`, `eval-designer`, `gatekeeper` (read-only), `remediation-engineer`, `db-migration-engineer` (only with `--with-db`) |
-| Workflows | `execute-wave` (parallel worktree builds + sequential merge), `gate-loop` (gate → audit → fix → re-gate) |
-| Hooks | `guard` (legacy read-only; script-owned evidence and state; human-owned thresholds; **approvals and `--force` always raise a permission prompt you must click**), `stop_gate` (no stopping on a failing gate while budget remains), `session_brief` |
-| Scripts (stdlib Python) | `state.py`, `tracker.py`, `run_gates.py` + `score.py` (+ `scanners.py`, `sonar.py`, `pii_scan.py`), `gate_compare.py`, `env.py`, `evals_run.py` (+ `expect.py`), `db_verify.py`, `cost_estimate.py`, `doctor.py` |
-| Config | `gates.json` (thresholds, scanner images), `pii-allowlist.json` (fake e-mail domains, test card numbers, skipped paths), `stack-catalog.json` (approved families + version policy) |
-| Tests | `tests/test_gates.py`: unit and integration tests for the gate scripts (`python -m unittest discover -s tests`, no Docker needed) |
-| Evals | 5 fast `claude plugin eval` cases + 1 nightly end-to-end pilot (`e2e-pilot-fixture`, tag `e2e`) on the `legacy-shop` fixture (Express 4 + jQuery 1.12 + MySQL 5.7 with planted issues); `patient-service` fixture (Flask, legacy with planted secrets/PII/SQLi vs fixed) for the static/security/PII gates |
+| Skills: user commands | `migrate` (orchestrator), `intake`, `discover`, `plan-stack`, `plan-migration`, `execute`, `gate` (import the Jenkins verdict), `remediate`, `status`, `tracker`, `setup` |
+| Skills: model knowledge | `sql-db-migration` (+ Postgres/MySQL/SQL Server refs), `cost-assessment` |
+| Agents | `story-analyst`, `stack-researcher`, `remediation-engineer`, `db-migration-engineer` (only with `--with-db`) |
+| Workflows | `execute-wave` (parallel worktree builds + sequential merge) |
+| Hooks | `guard` (legacy read-only; script-owned evidence, verdicts and state; human-owned settings; **approvals and `--force` always raise a permission prompt you must click**), `stop_gate` (no stopping on a failing Jenkins verdict while budget remains, unless a fix is committed and waiting for a build), `session_brief` |
+| Scripts (stdlib Python) | `state.py`, `tracker.py`, `jenkins_result.py`, `db_verify.py`, `cost_estimate.py`, `doctor.py` |
+| Config | `settings.json` (remediation cap, default Jenkins result URL, token budget), `stack-catalog.json` (approved families + version policy) |
+| Tests | `tests/test_jenkins_result.py` (verdict import, stop hook, guard; `python -m unittest discover -s tests`) |
+| Evals | 5 fast `claude plugin eval` cases (intake, tracker export, guard, refusing "done" on a FAIL verdict, DB method) on the `legacy-shop` fixture |
 
 ## Workspace a run creates
 ```
@@ -62,64 +73,27 @@ legacy/<name>        -> link to your repo (read-only, created by code-modernizat
 analysis/<name>/     ASSESSMENT.md, topology.json, BUSINESS_RULES.md, MODERNIZATION_BRIEF.md, VERIFICATION.md, SECURITY_FINDINGS.md
 modernized/          new code (git branches/worktrees per ticket wave)
 forge/
-  state.json         phase, approvals, gate history
+  state.json         phase, approvals, gate history (one entry per imported Jenkins verdict)
   story.md
   tracker/           tracker.json · board.md · history.log · epics/ stories/ tasks/ · checklists/ · export/jira-import.csv
   decisions/         ADR-001-target-stack.md · target-stack.json · plan.md · cost-report.md · c4/
   db/                inventory.md · strategy.md · map.json · verify.json   (DB track only)
-  env/               docker-compose.yml · seed/ · env.json   (legacy :18080 and new :28080, each with its own seeded data)
-  evals/             cases.json · coverage.md · results.json · results-legacy.json · ui/ (Playwright parity specs + golden screenshots from legacy)
-  evidence/          claude-security.json · gatekeeper-iteration-N.json
-  gates/             baseline/ (legacy) · iteration-N/{scorecard.json, feedback.md, raw/*} · latest.json · comparison.md
-  cost/              ledger.jsonl   (headless `claude -p` runs: exact USD per call)
-  gates.json         (optional) your threshold overrides. Only humans edit it
-  pii-allowlist.json (optional) extra fake domains / test numbers. Only humans edit it
+  evidence/          legacy-security-baseline.json (optional)
+  gates/             iteration-N/{summary.json, gate*.json, feedback.md, verdict.json} · latest.json   (imported from Jenkins)
+  settings.json      (optional) your overrides: remediation cap, Jenkins result URL, budget. Only humans edit it
 ```
-
-## Gate defaults (`config/gates.json`)
-A required check that **cannot run fails**, and so does a threshold whose metric was not measured. Nothing passes silently. The verdict is PASS only when every required check passes **and** the overall score is at least 85.
-
-| Check | Evidence | Pass when |
-|-------|----------|-----------|
-| tests | project test command (+JUnit XML) | 0 failing, ≥1 ran |
-| coverage | lcov / Cobertura / JaCoCo (+ diff-cover since `base_ref`); Istanbul / coverage.py summaries for overall only | changed lines ≥ 80% (falls back to overall ≥ 70% when diff coverage can't be measured) |
-| review | built-in `/code-review` + code-modernization `architecture-critic` (ADR drift, ported anti-patterns) on the diff since `base_ref` | 0 blocking, ≤ 5 major |
-| typecheck / lint | tsc, mypy, or the project script / eslint, ruff | 0 errors (lint optional) |
-| static | SonarQube Community (Docker) for the analysis this run submitted | quality gate OK, 0 bugs, 0 vulnerabilities, ≤ 5 hotspots, ≤ 50 smells, ≤ 5% duplication, A ratings |
-| security | Semgrep, gitleaks, Trivy (vuln/secret/misconfig/**licence**), npm audit, pip-audit, hardcoded credentials + claude-security verified findings | 0 critical, 0 high, 0 secrets, 0 hardcoded credentials, 0 forbidden/restricted licences; every scanner ran |
-| pii | PII/PHI scanner: SSN, Aadhaar, PAN, cards, e-mail, phone, DOB in code/config/seed data, PII values in logs | 0 findings (inline `pii-allow: <reason>` exceptions are listed and audited) |
-| behavior | VERIFICATION.md verdicts + `evals_run.py` against the side-by-side env (golden-master HTTP diff, **Playwright UI parity** that must pass on legacy first, `http_expect` expected-value cases for intended changes, acceptance tests; SQL diff on the DB track) | 0 NOT/PARTLY PROVEN, 100% evals |
-| database (only with `--with-db`) | `db_verify.py` row counts + order-independent checksums; up/down/up; squawk | 100% match, reversible (n/a when off) |
-| cost | tokens from transcripts; USD ledger for headless `claude -p` runs; Infracost on IaC | within budget you set; no call with unknown cost |
-| performance (opt.) | k6 summary vs legacy | p95 regression ≤ 10% |
-
-The `gatekeeper` agent then audits the evidence itself. It looks for skipped tests, added suppressions, stale coverage files, edited thresholds, and modules not covered. It can turn a PASS into a FAIL.
 
 ## Test the plugin
 ```
 claude plugin validate ./plugins/migration-forge
-cd plugins/migration-forge && python -m unittest discover -s tests -v   # gate scripts, no Docker needed
+cd plugins/migration-forge && python -m unittest discover -s tests -v
 cd plugins/migration-forge && claude plugin eval . --scaffold
 ```
 Use `--scaffold` because the cases seed fixture workspaces with the bash scripts in `evals/`.
 
-The end-to-end pilot is slow and expensive: it runs a full pilot, needs the dependency plugins and Docker, and takes up to an hour. Run it nightly, not on every change:
-```
-claude plugin eval . --scaffold --tag e2e
-```
-Skip it in fast runs by selecting the other cases with `--tag smoke --tag guardrail`. That case sets `EVAL_FORGE_AUTO_APPROVE=1` so approval prompts don't block a headless run. Never set it in a real session.
-
-## CI
-`/migration-forge:ci` vendors the gate scripts into `.forge-ci/` and writes `.github/workflows/forge-gates.yml`. A `Jenkinsfile` (Docker + Python only on the agent, with an optional headless Claude remediation loop under a USD budget), Azure DevOps or GitLab are available on request. It pins tool versions it fetched at generation time. The pipeline checks out the frozen legacy commit, starts both apps, runs the evals, and runs `run_gates.py` at the same thresholds. Only the checks that need Claude (the claude-security summary, the code review, and token cost) are relaxed, via `.forge-ci/gates.ci.json`. To restore them, enable the optional `claude-evidence` job.
-
 ## Honest limits
-- "Best" is proven per codebase. Run the pilot, read the scorecard, and tune `forge/gates.json`.
-- Changed-line coverage needs `diff-cover` and an lcov or XML report. Path mapping between the report and git can differ by stack, so check `raw/diff-cover.json` on the first gate. If it can't be measured, the gate says so and falls back to overall coverage.
-- The `review` and claude-security counts are produced by a model. The gatekeeper cross-checks them against the findings list, but they are not deterministic.
-- Lint and typecheck error counts from custom scripts are approximate (exit code plus a pattern count).
-- The PII scanner is pattern-based (with Luhn/Verhoeff/issuer checks): it finds identifiers and PII passed to loggers, not names or free-text addresses. Add an ML-based scanner such as Microsoft Presidio if you need those.
-- Scanner images default to `:latest`. The digest actually used is recorded in `raw/tool-versions.json`, but pin versions in `gates.json` when before/after numbers must be comparable.
+- The plugin trusts the Jenkins verdict for the commit it names. Pass `--commit` with the SHA the build tested; without it the import records the verdict as unverified.
+- The plugin doesn't run any gate itself, so nothing here stops a schema change while the DB track is off, or a weakened test, until the pipeline or a reviewer catches it. The skills and the remediation agent forbid both.
 - DB checksums compare normalized values across engines. Exotic types (spatial, custom domains) may need an entry in `map.json` with a reason.
-- Infra cost is gated only when IaC and Infracost exist. Otherwise it is a labeled estimate.
-- Token USD is never hardcoded. Set `cost.usd_per_mtok` yourself.
+- Token USD is never hardcoded. Set `cost.usd_per_mtok` yourself; the USD budget for headless runs is the pipeline's cost gate.
 - A large repo plus parallel waves uses a lot of tokens, so the plugin pilots one module first and asks before fanning out.

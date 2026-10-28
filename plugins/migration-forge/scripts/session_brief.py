@@ -23,7 +23,7 @@ counts = {}
 for t in tr["items"].values():
     counts[t["status"]] = counts.get(t["status"], 0) + 1
 print(f"[migration-forge] run '{st.get('name')}' phase={st.get('phase')} target={st.get('target')}")
-print(f"  approvals: {', '.join(st.get('approvals', {})) or 'none'}; gate iterations: {st.get('iteration', 0)}"
-      + (f"; latest verdict {card.get('verdict')} ({card.get('overall_score')})" if card else ""))
+print(f"  approvals: {', '.join(st.get('approvals', {})) or 'none'}; Jenkins verdicts imported: {st.get('iteration', 0)}"
+      + (f"; latest {card.get('verdict')} for {str(card.get('head') or '?')[:10]}" if card else ""))
 print(f"  tickets: {json.dumps(counts)}")
 print("  Resume with /migration-forge:status (or /migration-forge:migrate to continue the pipeline).")

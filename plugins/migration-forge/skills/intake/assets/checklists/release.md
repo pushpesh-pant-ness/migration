@@ -1,5 +1,5 @@
 # Release checklist
-- [ ] Latest scorecard PASS and gatekeeper PASS (link iteration)
+- [ ] Latest Jenkins quality gate PASS for the release commit (link the build and forge/gates/iteration-N)
 - [ ] VERIFICATION.md: all in-scope modules PROVEN, signed by approver + second engineer
 - [ ] SECURITY_FINDINGS.md (modernize-harden): no open critical/high; accepted risks documented with owner
 - [ ] Dependency licences reviewed (no new copyleft in proprietary code without approval)

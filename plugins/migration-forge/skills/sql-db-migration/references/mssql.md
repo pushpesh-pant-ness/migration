@@ -8,7 +8,7 @@
 - **Online index ops** (`ONLINE = ON`) need Enterprise edition or Azure.
 
 ## Gotchas when migrating FROM SQL Server
-- **T-SQL procedural code:** temp tables, `@@IDENTITY` vs `SCOPE_IDENTITY()`, `TRY…CATCH`, cursors, `MERGE`, and `OUTPUT`. Each needs a BR id plus an eval case. Prefer moving the logic into application code.
+- **T-SQL procedural code:** temp tables, `@@IDENTITY` vs `SCOPE_IDENTITY()`, `TRY…CATCH`, cursors, `MERGE`, and `OUTPUT`. Each needs a BR id plus a test or eval case. Prefer moving the logic into application code.
 - `NVARCHAR` stores UTF-16, so lengths are characters. Map to `VARCHAR` (Postgres, UTF-8) carefully, and check the max lengths.
 - `DATETIME` has about 3 ms precision, rounded to .000/.003/.007. `DATETIME2` and Postgres keep microseconds. Use normalized comparison (db_verify does), and decide the rounding.
 - `MONEY` has 4-decimal fixed rounding. Map it to `NUMERIC(19,4)`.

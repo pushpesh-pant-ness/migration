@@ -21,7 +21,7 @@ As a <user role> I want <feature> on the new stack so that <business value / ris
 AC:
 - Given <state> When <action> Then <observable outcome>, identical to legacy (BR-12, BR-14)
 - Given <edge: empty / max / invalid / unauthorized> When … Then …
-- Given the modernized module When the gate runs Then the module is PROVEN in VERIFICATION.md
+- Given the modernized module When the Jenkins gate runs Then it passes and the module is PROVEN in VERIFICATION.md
 ```
 
 ## INVEST checklist
@@ -31,7 +31,7 @@ Each story is:
 - **Valuable** to a named role
 - **Estimable**
 - **Small**: 8 points or fewer
-- **Testable**: every AC maps to an eval case
+- **Testable**: every AC maps to an acceptance test or a Jenkins eval case
 
 ## Priority heuristics
 - **P0:** money movement, legal or compliance data, authn/authz, or anything that blocks three or more stories.

@@ -89,8 +89,8 @@ def default_body(t, spec):
         lines += ["## Acceptance criteria"] + [f"- [ ] {c}" for c in spec.get("acceptance", [])] + [""]
         dod = spec.get("dod") or [
             "Tests written first and passing (unit + acceptance)",
-            "Behavior equivalence evidence linked (VERIFICATION.md or eval case)",
-            "Latest gate scorecard PASS for the modules touched",
+            "Behavior equivalence evidence linked (VERIFICATION.md or a Jenkins eval case)",
+            "Jenkins quality gate PASS for the commit that contains this work (forge/gates/latest.json)",
             "No new critical/high security findings",
             "Docs/ADR updated if behavior or architecture changed"]
         lines += ["## Definition of done"] + [f"- [ ] {c}" for c in dod] + [""]

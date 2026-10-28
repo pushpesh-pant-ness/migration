@@ -2,7 +2,7 @@
 """Run state for a migration: forge/state.json.
 
   state.py init --name shop --repo ../legacy-shop --story story.md [--target "react+nestjs+postgres"] [--with-db]
-      --with-db turns on the optional database-migration track (schema/data/engine changes + DB gate).
+      --with-db turns on the optional database-migration track (schema/data/engine changes + DB evidence).
       Off by default: the existing database is kept as-is. Toggle later: state.py set db_migration true
   state.py phase <phase>                 # move the pipeline pointer
   state.py approve <backlog|stack|migration|release> --by "<name>"
@@ -30,7 +30,7 @@ def cmd_init(a):
     fd = ws / FORGE_DIR
     if (fd / "state.json").exists() and not a.force:
         sys.exit("forge/state.json already exists (use --force to re-init)")
-    for sub in ["tracker", "gates", "decisions", "db", "evals"]:
+    for sub in ["tracker", "gates", "decisions", "db"]:
         (fd / sub).mkdir(parents=True, exist_ok=True)
     story_dst = fd / "story.md"
     if a.story and pathlib.Path(a.story).is_file():
