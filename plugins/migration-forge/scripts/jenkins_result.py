@@ -9,8 +9,10 @@ The location defaults to jenkins.results_url in settings. It is the pipeline's r
 feedback.md and gate1..4.json are read from the same folder when present.
 Writes forge/gates/iteration-N/{summary.json, feedback.md, gate*.json, verdict.json}, forge/gates/latest.json and a
 state.gate_history entry. The verdict is PASS only when the phase was enforced (not a baseline), every gate passed and
-no check was skipped. It records the workspace's git HEAD: a PASS counts for that commit only. With --commit, a result
-for any other commit is refused. A result that was already imported is refused too (it would skew the retry budget).
+no check was skipped. It records the workspace's git HEAD: a PASS counts for that commit only. The commit Jenkins built
+comes from --commit (or a "commit"/"git_commit" field in summary.json): a result for any other commit is refused, and a
+PASS without one is refused (it could be an older build's). A result that was already imported is refused too (it would
+skew the retry budget). Uncommitted changes outside forge/ are recorded as workspace_dirty: the verdict doesn't cover them.
 URLs: JENKINS_USER + JENKINS_TOKEN from the environment for basic auth (never stored).
 Exit 0 PASS, 2 FAIL.
 """
@@ -21,12 +23,12 @@ import json
 import os
 import pathlib
 import re
-import subprocess
 import sys
 import urllib.error
 import urllib.request
 
-from forgelib import forge, load_settings, now, read_json, save_state, state, workspace, write_json
+from forgelib import (code_changes, forge, git_head, load_settings, native_path, not_code, now, read_json, save_state,
+                      state, workspace, write_json)
 
 
 def fetch(loc, sibling=None):
@@ -78,11 +80,6 @@ def failures(summary, gate_files):
     return out
 
 
-def git(ws, *args):
-    p = subprocess.run(["git", *args], cwd=ws, capture_output=True, text=True)
-    return p.stdout.strip() if p.returncode == 0 else None
-
-
 def cmd_import(a):
     ws, st = workspace(), state()
     loc = a.location or (load_settings(ws).get("jenkins") or {}).get("results_url")
@@ -98,12 +95,24 @@ def cmd_import(a):
     if not summary.get("enforced", False):
         sys.exit(f"phase '{summary.get('phase')}' is a baseline (not enforced): it records numbers, it is not a verdict. "
                  "Import an enforced phase such as 'after'.")
-    head = git(ws, "rev-parse", "HEAD")
-    dirty = bool(git(ws, "status", "--porcelain", "--untracked-files=no"))  # before this import writes its files
-    if a.commit and head and not head.startswith(a.commit) and not a.commit.startswith(head):
-        sys.exit(f"this result is for commit {a.commit}, but the workspace is at {head}: "
+    head = git_head(ws)
+    if not re.match(r"https?://", loc):
+        loc = str(native_path(loc).resolve())  # absolute, so later checks know which folder held the result
+    # Only code counts: forge/ (state, tracker, earlier verdicts) changes with every step of the run.
+    dirty = bool(code_changes(ws, "HEAD", uncommitted=True, exclude=not_code(ws, {"location": loc}))) if head else False
+    commit = (a.commit or str(summary.get("commit") or summary.get("git_commit") or "")).strip() or None
+    if commit and len(commit) < 7:
+        sys.exit(f"--commit {commit} is too short to identify a commit (use at least 7 characters of GIT_COMMIT)")
+    if commit and head and not head.startswith(commit) and not commit.startswith(head):
+        sys.exit(f"this result is for commit {commit}, but the workspace is at {head}: "
                  "let Jenkins build the current commit, then import that result")
-    sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    would_pass = (not summary.get("failed_gates") and summary.get("all_passed") and not summary.get("skipped_checks")
+                  and summary.get("complete", True) is not False)
+    if would_pass and not commit:
+        sys.exit("REFUSED: a PASS must name the commit Jenkins built (it could be an older build's result). "
+                 "Re-run with --commit <GIT_COMMIT of that build>. Nothing was imported.")
+    # The same result for the same commit is a re-import; identical results for a new commit are a new verdict.
+    sha = hashlib.sha256((text + "\n" + (commit or "")).encode("utf-8")).hexdigest()
     prev = read_json(forge(ws) / "gates" / "latest.json", {}) or {}
     if prev.get("summary_sha256") == sha:
         sys.exit(f"this result was already imported as iteration {prev.get('iteration')}; "
@@ -115,6 +124,8 @@ def cmd_import(a):
     it.mkdir(parents=True, exist_ok=True)
     (it / "summary.json").write_text(text, encoding="utf-8")
     for g in summary["gates"]:
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", str(g)):
+            continue  # a gate name is used as a file name: never a path
         t = fetch(loc, f"{g}.json")
         if t:
             (it / f"{g}.json").write_text(t, encoding="utf-8")
@@ -132,7 +143,7 @@ def cmd_import(a):
     card = {"iteration": n, "iteration_dir": str(it), "source": "jenkins", "imported_at": now(), "location": loc,
             "build": a.build, "phase": summary.get("phase"), "verdict": verdict, "overall_score": None,
             "failures": fails, "gates": {g: {"passed": v.get("passed")} for g, v in summary["gates"].items()},
-            "feedback": str(it / "feedback.md") if fb else None, "head": head, "commit_verified": bool(a.commit),
+            "feedback": str(it / "feedback.md") if fb else None, "head": head, "commit_verified": bool(commit and head),
             "workspace_dirty": dirty, "summary_sha256": sha}
     write_json(it / "verdict.json", card)
     write_json(forge(ws) / "gates" / "latest.json", card)
@@ -141,11 +152,11 @@ def cmd_import(a):
                                               "head": head})
     save_state(st, ws)
     print(f"JENKINS VERDICT {verdict} (phase {summary.get('phase')}, iteration {n}) for commit {head or '?'}"
-          + ("" if a.commit else " - not verified: pass --commit <sha Jenkins built>"))
+          + ("" if commit else " - not verified: pass --commit <sha Jenkins built>"))
     for f in fails:
         print(f"  BLOCKER {f['check']}: {'; '.join(f['reasons'])}")
     if dirty:
-        print("  note: the workspace has uncommitted changes; this verdict does not cover them")
+        print("  note: the workspace has uncommitted code changes (outside forge/); this verdict does not cover them")
     if fb:
         print(f"  feedback for remediation: {it / 'feedback.md'}")
     sys.exit(0 if verdict == "PASS" else 2)

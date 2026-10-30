@@ -49,12 +49,12 @@ const built = await parallel(args.tickets.map(t => () =>
   agent(
     `You are implementing migration ticket ${t.id} ("${t.title}") for run "${args.name}" in an isolated git worktree.
 Modules: ${(t.modules || []).join(', ')}. Track: ${t.track}. Acceptance tests are named after ${t.id}.
-Legacy source (READ-ONLY) is at: ${args.repo}. If legacy/${args.name} does not exist in this worktree, create the same link
-(POSIX: ln -s "${args.repo}" legacy/${args.name}; Windows: cmd /c mklink /J legacy\\${args.name} "${args.repo}"). Never write into it.
+Legacy source (READ-ONLY) is at: ${args.repo}. If legacy/${args.name} does not exist in this worktree, run: ${F} forge.py state link
+Never write into it.
 Steps:
 1. git switch -c forge/${t.id}
 2. Run this ticket's acceptance tests (named after ${t.id}) and confirm they fail first.
-3. Build with the ${t.track} track: invoke /code-modernization:modernize-${t.track === 'uplift' ? 'uplift' : t.track === 'reimagine' ? 'reimagine' : 'transform'} via the Skill tool, scoped to ${(t.modules || []).join(', ')} only. Do not touch other modules.
+3. Build with the ${t.track} track as ${args.plugin_root}/skills/execute/references/build-tracks.md describes, scoped to ${(t.modules || []).join(', ')} only. Do not touch other modules.
 4. Make the acceptance tests and the project tests for these modules pass. Do not weaken or skip tests and do not add suppressions.
 5. Do NOT run tracker.py move or import a gate verdict (the orchestrator does that). Commit: git add -A && git commit -m "forge(${t.id}): ${t.title}".
 Return status built only if the acceptance tests for this ticket pass.`,

@@ -1,14 +1,15 @@
 {
   "name": "migration-forge-marketplace",
-  "owner": { "name": "Pushpesh Pant" },
-  "description": "Story-driven, gated codebase migration for Claude Code",
-  "allowCrossMarketplaceDependenciesOn": ["claude-plugins-official"],
+  "owner": {
+    "name": "Pushpesh Pant"
+  },
+  "description": "Story-driven, gated codebase migration (standalone toolkit; Claude Code adapter)",
   "plugins": [
     {
       "name": "migration-forge",
       "source": "./plugins/migration-forge",
       "description": "Story + repo in, gated modernization out: local Jira-style backlog, stack research, SQL DB migration, remediation driven by the Jenkins quality-gate verdict",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "category": "development"
     }
   ]

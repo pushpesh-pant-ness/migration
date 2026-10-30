@@ -1,15 +1,19 @@
 {
   "name": "migration-forge",
   "displayName": "Migration Forge",
-  "version": "0.1.0",
-  "description": "Story + repo (frontend, backend, SQL DB) in; gated, verified modernization out. Orchestrates Anthropic's code-modernization plugin and adds a local Jira-style backlog, target-stack research, a hand-off to the Jenkins quality-gate pipeline with a remediation loop driven by its verdict, and an optional (opt-in) SQL database-migration track.",
-  "author": { "name": "AI_OFFICE_NESS" },
+  "version": "0.2.0",
+  "description": "Story + repo (frontend, backend, SQL DB) in; gated, verified modernization out. A standalone, tool-neutral toolkit (stdlib Python CLI + Agent Skills) with a local Jira-style backlog, target-stack research, built-in assess/build/verify/harden playbooks, a hand-off to the Jenkins quality-gate pipeline with a remediation loop driven by its verdict, and an optional (opt-in) SQL database-migration track. This manifest is the Claude Code adapter.",
+  "author": {
+    "name": "AI_OFFICE_NESS"
+  },
   "license": "Apache-2.0",
-  "keywords": ["migration", "modernization", "legacy", "sql", "jenkins", "security", "jira"],
-  "dependencies": [
-    "code-modernization@claude-plugins-official",
-    "claude-security@claude-plugins-official",
-    "security-guidance@claude-plugins-official",
-    "context7@claude-plugins-official"
+  "keywords": [
+    "migration",
+    "modernization",
+    "legacy",
+    "sql",
+    "jenkins",
+    "security",
+    "jira"
   ]
 }

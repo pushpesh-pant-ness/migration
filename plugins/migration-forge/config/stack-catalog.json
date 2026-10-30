@@ -1,5 +1,5 @@
 {
-  "_doc": "Approved target families per source technology. Versions are deliberately NOT pinned here (they go stale): stack-researcher pins exact versions at plan time from Context7 / official release pages and records them in the ADR. Edit 'preferred' to encode your org's standards.",
+  "_doc": "Approved target families per source technology. Versions are deliberately NOT pinned here (they go stale): stack-researcher pins exact versions at plan time from endoflife.date and official release pages and records them in the ADR. Edit 'preferred' to encode your org's standards.",
   "version_policy": {
     "rule": "Use the newest LTS (or newest stable if the project has no LTS) that has been released for at least 60 days and is inside its support window for >= 18 more months.",
     "evidence_required": "Release date and end-of-support date with a source URL for every pinned component."

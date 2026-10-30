@@ -1,29 +1,29 @@
 ---
-description: Discover a legacy codebase for migration - architecture, features, business rules, dependencies, C4 diagrams and SQL database inventory - by driving Anthropic's code-modernization assessment and mapping it onto the local backlog. Use after intake, or when the user asks to analyse/assess/map a legacy repo.
+name: discover
+description: Discover a legacy codebase for migration - baseline build, architecture, features, business rules, dependencies, C4 diagrams and SQL database inventory - with the built-in assessment method, mapped onto the local backlog. Use after intake, or when the user asks to analyse/assess/map a legacy repo.
 argument-hint: (no arguments; uses forge/state.json)
 ---
 
 # Discover
 
-`F` = `bash "${CLAUDE_PLUGIN_ROOT}/scripts/py.sh"`
+`forge` = `"<forge-root>/bin/forge"` (Windows shells: `bin\forge.cmd`). `<forge-root>` is this toolkit's folder: `${CLAUDE_PLUGIN_ROOT}` in Claude Code, otherwise `$FORGE_ROOT` (see `AGENTS.md`).
 
-Read `<name>`, `repo`, and `target` from `F state.py show`. Then run `F state.py phase discover`.
+Read `<name>`, `repo`, and `target` from `forge state show`. Then run `forge state phase discover`.
 
 ## Steps
-1. **Preflight and assess with code-modernization.** If those commands are missing, follow its README manually.
-   - `/code-modernization:modernize-preflight <name> <target> --source <repo>`. This creates the `legacy/<name>` link. If the link is a symlink, follow the instructions it prints about `additionalDirectories` and deny rules.
-   - `/code-modernization:modernize-assess <name>`, which writes `ASSESSMENT.md`.
-   - `/code-modernization:modernize-map <name>`, which writes `topology.json` and `TOPOLOGY.html`.
-   - `/code-modernization:modernize-extract-rules <name>`, which writes `BUSINESS_RULES.md`. Then run `/code-modernization:modernize-review <name>`, so a human confirms the P0 rules.
-2. **C4 diagrams.** If the wshobson `c4-architecture` plugin is installed, use its `c4-context` and `c4-container` agents. Otherwise derive Mermaid C4 from `topology.json`. Write the result to `forge/decisions/c4/{context,container}.md`.
-3. **Database** (only when `db_migration` is true in state). Run the `db-migration-engineer` agent in **inventory** mode. It sets `has_database false` when there is no SQL database. When the track is off, skip this step. Just note the DB engine and version from `ASSESSMENT.md` so the stack-researcher can check driver compatibility against the unchanged server.
-4. **Run these together.** In a single message, delegate:
-   - the `stack-researcher` agent in *current-stack inventory only* mode. It confirms the exact current versions and their EOL status, and does **not** propose a target yet. It writes `forge/decisions/current-stack.md`.
-   - optional: `/claude-security` "scan codebase" on `legacy/<name>`, as a **baseline**. The point is to know which vulnerabilities must not be carried over. Save its summary as `forge/evidence/legacy-security-baseline.json`.
-5. **Refine the backlog.** Run the `story-analyst` agent in refinement pass mode. It reads all of the above, adds module stories mapped to BR ids, and records `blocked_by` edges. Then run `F tracker.py validate`, which must exit 0, and `F tracker.py board`.
+1. **Assess.** Make sure `legacy/<name>` exists (`forge state link` re-creates it). Then follow `<forge-root>/skills/discover/references/assessment-method.md` in order. It writes, under `analysis/<name>/`:
+   - `ASSESSMENT.md` (baseline build and tests, inventory, recommended track per layer)
+   - `topology.json` and `topology.mmd`
+   - `BUSINESS_RULES.md`, with the human review of the P0 rules
+2. **C4 diagrams.** Derive Mermaid C4 context and container diagrams from `topology.json` (or use a C4 skill if your tool has one). Write them to `forge/decisions/c4/{context,container}.md`.
+3. **Database** (only when `db_migration` is true in state). Delegate to the `db-migration-engineer` role in **inventory** mode. It sets `has_database false` when there is no SQL database. When the track is off, skip this step. Just note the DB engine and version from `ASSESSMENT.md` so the stack researcher can check driver compatibility against the unchanged server.
+4. **Run these together** (in parallel if your tool can):
+   - delegate to the `stack-researcher` role in *current-stack inventory only* mode. It confirms the exact current versions and their EOL status, and does **not** propose a target yet. It writes `forge/decisions/current-stack.md`.
+   - optional: follow the `harden` skill in **legacy-baseline** mode, so you know which vulnerabilities must not be carried over. It writes `forge/evidence/legacy-security-baseline.json`.
+5. **Refine the backlog.** Delegate to the `story-analyst` role in refinement pass mode. It reads all of the above, adds module stories mapped to BR ids, and records `blocked_by` edges. Then run `forge tracker validate`, which must exit 0, and `forge tracker board`.
 6. **Close out.** Tick the items you completed in `forge/tracker/checklists/discovery.md`. Commit. Then report in at most 15 lines:
    - module count
-   - P0 rules
+   - P0 rules, and any still `needs-review`
    - EOL components
    - DB size and complexity
    - top risks

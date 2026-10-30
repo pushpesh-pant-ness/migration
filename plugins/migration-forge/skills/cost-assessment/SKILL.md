@@ -1,12 +1,15 @@
 ---
-description: Method for the migration cost report - Claude token spend from transcripts, pilot-based projection, Infracost for IaC, and levers to cut cost without cutting verification. Use when estimating or reporting migration cost (budget gating runs in the Jenkins pipeline).
+name: cost-assessment
+description: Method for the migration cost report - LLM token spend (usage ledger, or Claude Code transcripts), pilot-based projection, Infracost for IaC, and levers to cut cost without cutting verification. Use when estimating or reporting migration cost (budget gating runs in the Jenkins pipeline).
 user-invocable: false
 ---
 
 # Cost assessment
 
+`forge` = `"<forge-root>/bin/forge"` (Windows shells: `bin\forge.cmd`). `<forge-root>` is this toolkit's folder: `${CLAUDE_PLUGIN_ROOT}` in Claude Code, otherwise `$FORGE_ROOT` (see `AGENTS.md`).
+
 ## Producing the cost report (done by the main conversation, no subagent)
-1. Run `bash "${CLAUDE_PLUGIN_ROOT}/scripts/py.sh" cost_estimate.py --out forge/cost.json`.
+1. Run `forge cost --out forge/cost.json`.
 2. Write `forge/decisions/cost-report.md` with:
    - spend to date
    - the projection (formula below, with its assumptions)
@@ -16,7 +19,10 @@ user-invocable: false
 3. Report 5 lines: the numbers and one recommendation.
 
 ## What is measured, and how
-- **Token spend:** `cost_estimate.py` sums `usage` from this workspace's Claude Code transcripts (`~/.claude/projects/<encoded-path>/**/*.jsonl`) since `state.started_at`, deduplicated by message id. Subagent and workflow transcripts are included because they sit under the same project directory.
+- **Token spend:** `forge cost` sums, since `state.started_at`, every usage source that exists:
+  - `forge/usage.jsonl`, the tool-neutral ledger. Whoever knows the spend appends to it: the agent from its tool's usage display, a sandbox harness from its API responses, or a human. `forge cost log --input N --output N [--cache-creation N] [--cache-read N] --source <tool>`.
+  - in Claude Code, this workspace's transcripts (`~/.claude/projects/<encoded-path>/**/*.jsonl`), deduplicated by message id, subagents and workflows included. Nothing to log there.
+  - With neither, the report says spend is unknown, never zero.
   - The budget figure, `tokens_total`, is input + output + cache_creation.
   - Cache reads are reported separately. They are cheap and would distort a budget.
 - **USD for tokens:** only when the human sets `cost.usd_per_mtok` in `forge/settings.json`. Prices change and differ by model and plan, so they are never hardcoded.

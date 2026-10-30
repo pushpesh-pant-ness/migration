@@ -1,13 +1,17 @@
 {
-  "_doc": "Plugin settings. Copy to <workspace>/forge/settings.json to override per run (only humans edit it). The quality gates and behavioral evals run in the Jenkins pipeline; this plugin only imports their verdict (scripts/jenkins_result.py).",
+  "_doc": "Toolkit settings. Copy to <workspace>/forge/settings.json to override per run (only humans edit it). The quality gates and behavioral evals run in the Jenkins pipeline; this toolkit only imports their verdict (forge gate import).",
   "max_remediation_iterations": 3,
   "jenkins": {
     "results_url": "",
-    "_doc": "Default location of the pipeline's summary.json for `jenkins_result.py import` when none is given, e.g. https://jenkins.example.com/job/hms/lastCompletedBuild/artifact/quality-gates/results/after/summary.json. Credentials come only from JENKINS_USER + JENKINS_TOKEN in the environment."
+    "_doc": "Default location of the pipeline's summary.json for `forge gate import` when none is given, e.g. https://jenkins.example.com/job/hms/lastCompletedBuild/artifact/quality-gates/results/after/summary.json, or a local path to a downloaded copy (works offline and in sandboxes). Credentials come only from JENKINS_USER + JENKINS_TOKEN in the environment."
+  },
+  "approvals": {
+    "require_tty": false,
+    "_doc": "true: `forge state approve` asks for the run name on an interactive terminal, so only a human in their own terminal can record an approval. Use it with tools that have no permission prompt, and in unattended sandboxes."
   },
   "cost": {
     "max_tokens": 0,
     "usd_per_mtok": null,
-    "_doc": "max_tokens: Claude token budget for the plan self-check and pilot projection (0 = none). usd_per_mtok: {\"input\":..,\"output\":..,\"cache_creation\":..,\"cache_read\":..} to report USD; prices change, so none are hardcoded."
+    "_doc": "max_tokens: LLM token budget for the plan self-check and pilot projection (0 = none). usd_per_mtok: {\"input\":..,\"output\":..,\"cache_creation\":..,\"cache_read\":..} to report USD; prices change, so none are hardcoded."
   }
 }

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Migration Forge CLI launcher for POSIX shells (Linux, macOS, Git Bash, WSL, containers).
+# Uses the first Python >= 3.9 among python3, python, py -3. Usage: forge <command> [args...]; forge help
+dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec bash "$dir/scripts/py.sh" forge.py "$@"

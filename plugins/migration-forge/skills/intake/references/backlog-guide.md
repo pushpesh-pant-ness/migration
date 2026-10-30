@@ -6,7 +6,7 @@
 | F1 | Characterization tests on legacy behavior | Given the legacy system at commit X, when the suite runs, then it records golden outputs for every P0 endpoint/report |
 | F2 | Target scaffolding + CI pipeline | Given a clean checkout, when CI runs, then build, lint, typecheck, tests, and security scans all execute and report |
 | F3 | *(only when `db_migration` is on)* Data migration (schema + data + rollback) | Given a copy of production-shaped data, when migrations run up/down/up, then the schema is restored, and db_verify reports a 100% row and checksum match |
-| F4 | Security hardening | Given the modernized build, when scanners and the claude-security scan run, then there are 0 critical/high findings and 0 secrets |
+| F4 | Security hardening | Given the modernized build, when the scanners and the harden review run, then there are 0 critical/high findings and 0 secrets |
 | F5 | Cutover + rollback rehearsal | Given the runbook, when it is rehearsed on staging, then cutover finishes inside the downtime budget, and rollback restores service in under N minutes |
 | F6 | Legacy decommission | Given N days of clean operation, when the legacy system is switched off, then no traffic and no data writes are lost |
 

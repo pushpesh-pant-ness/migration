@@ -1,5 +1,6 @@
 ---
-description: Reference method for SQL database migrations in legacy modernization - strategy selection (in-place upgrade, expand/contract, dual-write/CDC, big-bang), zero-downtime schema change rules, cross-engine type mapping, migration tooling (Flyway, Liquibase, Alembic, Prisma, EF Core) and verification with db_verify.py. Use when planning or writing any database migration, schema change or data copy.
+name: sql-db-migration
+description: Reference method for SQL database migrations in legacy modernization - strategy selection (in-place upgrade, expand/contract, dual-write/CDC, big-bang), zero-downtime schema change rules, cross-engine type mapping, migration tooling (Flyway, Liquibase, Alembic, Prisma, EF Core) and verification with `forge db` (db_verify.py). Use when planning or writing any database migration, schema change or data copy.
 user-invocable: false
 ---
 
@@ -53,8 +54,8 @@ Case sensitivity: MySQL and SQL Server collations are usually case-insensitive, 
 Stored procedures, triggers, and functions either move into application code, which is preferred for testability, or get ported (T-SQL / PL/SQL → PL/pgSQL). Each one needs a business-rule id and an eval case. Tools: ora2pg (Oracle), AWS SCT, and the SQL Server Migration Assistant for the assessment.
 
 ## 6. Evidence (`forge/db/verify.json`, attached to the DB tickets)
-1. `db_verify.py reversibility`: run on a disposable container DB. It proves down restores the schema and up is repeatable.
-2. `db_verify.py compare --map forge/db/map.json`: per-table row count plus an order-independent checksum over normalized values. The target is 100%.
+1. `forge db reversibility`: run on a disposable container DB. It proves down restores the schema and up is repeatable.
+2. `forge db compare --map forge/db/map.json`: per-table row count plus an order-independent checksum over normalized values. The target is 100%.
 3. squawk for Postgres migrations.
 4. Result-equality checks for reports and aggregates. Ask the Jenkins pipeline owners to add them to the evals.
 

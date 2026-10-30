@@ -11,8 +11,8 @@ Apply these before scoring. Any option that violates one is out:
 - downtime budget, which affects whether the DB engine can change
 
 ## 2. Version pinning. The procedure for each component:
-1. `WebFetch https://endoflife.date/api/<product>.json`. Pick the newest cycle that matches `version_policy`: LTS if one exists, released at least 60 days ago, and with at least 18 months of support left. Record `latest` (the patch), `releaseDate`, `eol`/`support`, and the URL.
-2. Context7: resolve the library, then fetch its "upgrade"/"migration" docs from the source major to the target major. Record the breaking changes.
+1. Fetch `https://endoflife.date/api/<product>.json` (your tool's web fetch, or `curl -s`). Pick the newest cycle that matches `version_policy`: LTS if one exists, released at least 60 days ago, and with at least 18 months of support left. Record `latest` (the patch), `releaseDate`, `eol`/`support`, and the URL.
+2. Fetch the official "upgrade"/"migration" guides from the source major to the target major (Context7 can find them faster when your tool has it). Record the breaking changes.
 3. Peer compatibility: the framework's supported runtime range, the ORM's supported DB versions, and the DB driver ↔ server. Each needs a doc link.
 4. If a component is not on endoflife.date, use its official releases page (GitHub releases, vendor lifecycle page).
 
@@ -51,7 +51,7 @@ frontend: uplift | transform | reimagine — backend: … — DB: in-place | exp
 ## Consequences
 ## Rejected options
 ```
-Each layer's track feeds `/code-modernization:modernize-brief`:
+Each layer's track feeds the modernization brief (`skills/plan-migration/references/brief-method.md`) and the build tracks (`skills/execute/references/build-tracks.md`):
 - **uplift:** same framework, newer version
 - **transform:** different framework, same behavior
 - **reimagine:** a redesign

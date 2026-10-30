@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Cost report inputs for the pilot projection and status (cost gating itself runs in the Jenkins pipeline).
 
-1. Claude token spend for this run: sums usage from Claude Code transcripts of this workspace
-   (~/.claude/projects/<encoded-workspace>/**/*.jsonl) since state.started_at, deduped by message id.
+1. LLM token spend for this run, since state.started_at, from every source that exists:
+   - forge/usage.jsonl: a tool-neutral ledger. Any agent, harness or human appends to it with
+     `cost_estimate.py log --input N --output N [--cache-creation N] [--cache-read N] [--source <tool>]`.
+   - Claude Code transcripts of this workspace (~/.claude/projects/<encoded-workspace>/**/*.jsonl), when present,
+     deduped by message id. Other tools leave this source empty.
    tokens_total = input + output + cache_creation (cache reads reported separately; they are cheap).
 2. Infra cost: Infracost on IaC (*.tf) in legacy and modernized trees, if infracost is installed
    and authenticated. Increase % is computed only when both sides have a figure.
 
-  cost_estimate.py [--root modernized/<name>] [--out forge/cost.json]
+  cost_estimate.py [report] [--root modernized/<name>] [--out forge/cost.json]
+  cost_estimate.py log --input N --output N [--cache-creation N] [--cache-read N] [--source codex] [--note "..."]
 Budget: cost.max_tokens in settings (0 = none). Optional USD for tokens: set
 "cost": {"usd_per_mtok": {"input":..,"output":..,"cache_creation":..,"cache_read":..}} in forge/settings.json
 (prices change; none are hardcoded).
@@ -21,7 +25,9 @@ import re
 import shutil
 import subprocess
 
-from forgelib import forge, load_settings, read_json, state, workspace, write_json
+from forgelib import forge, load_settings, now, read_json, state, workspace, write_json
+
+KEYS = ("input", "output", "cache_creation", "cache_read")
 
 
 def _projects_dir():
@@ -29,10 +35,29 @@ def _projects_dir():
     return pathlib.Path(base) / "projects"
 
 
+def ledger_spend(ws, since):
+    """Totals from forge/usage.jsonl and the number of entries counted."""
+    tot, n = dict.fromkeys(KEYS, 0), 0
+    led = forge(ws) / "usage.jsonl"
+    if led.is_file():
+        for line in led.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if since and (e.get("at") or "") < since:
+                continue
+            n += 1
+            for k in KEYS:
+                tot[k] += int(e.get(k) or 0)
+    return tot, n
+
+
 def token_spend(ws, since):
+    """Totals from Claude Code transcripts, the number of transcript files, and their folder."""
     enc = re.sub(r"[^A-Za-z0-9]", "-", str(ws))
     d = _projects_dir() / enc
-    seen, tot = set(), {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0}
+    seen, tot = set(), dict.fromkeys(KEYS, 0)
     files = glob.glob(str(d / "**" / "*.jsonl"), recursive=True) if d.is_dir() else []
     for f in files:
         with open(f, encoding="utf-8", errors="replace") as fh:
@@ -72,11 +97,15 @@ def infracost(path, out):
 
 def estimate(ws, st, root, out):
     cost = load_settings(ws).get("cost") or {}
-    tok, nfiles, tdir = token_spend(ws, st.get("started_at"))
+    tr, nfiles, tdir = token_spend(ws, st.get("started_at"))
+    led, nled = ledger_spend(ws, st.get("started_at"))
+    tok = {k: tr[k] + led[k] for k in KEYS}
     res = {"tokens_total": tok["input"] + tok["output"] + tok["cache_creation"], "max_tokens": cost.get("max_tokens") or 0,
-           "tokens": tok, "transcripts_scanned": nfiles, "transcripts_dir": tdir}
-    if not nfiles:
-        res["tokens_note"] = f"no transcripts found under {tdir}: spend unknown, not zero"
+           "tokens": tok, "sources": {"usage_ledger_entries": nled, "claude_code_transcripts": nfiles},
+           "transcripts_dir": tdir}
+    if not nfiles and not nled:
+        res["tokens_note"] = ("no usage recorded (forge/usage.jsonl is empty and no Claude Code transcripts were found): "
+                              "spend unknown, not zero. Log usage with `forge cost log`.")
     prices = cost.get("usd_per_mtok")
     if prices:
         res["tokens_usd"] = round(sum(tok[k] * float(prices.get(k, 0)) / 1e6 for k in tok), 2)
@@ -91,11 +120,28 @@ def estimate(ws, st, root, out):
     return res
 
 
+def log_usage(ws, a):
+    e = {"at": now(), "source": a.source, **{k: getattr(a, k) or 0 for k in KEYS}}
+    if a.note:
+        e["note"] = a.note
+    with open(forge(ws) / "usage.jsonl", "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(e) + "\n")
+    print(f"logged {sum(e[k] for k in KEYS)} tokens from {a.source}")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
+    ap.add_argument("action", nargs="?", choices=["report", "log"], default="report")
     ap.add_argument("--root")
     ap.add_argument("--out")
+    for k in KEYS:
+        ap.add_argument("--" + k.replace("_", "-"), dest=k, type=int, default=0)
+    ap.add_argument("--source", default="manual", help="the tool or harness that spent the tokens")
+    ap.add_argument("--note")
     a = ap.parse_args()
     ws, st = workspace(), state()
+    if a.action == "log":
+        log_usage(ws, a)
+        raise SystemExit(0)
     root = pathlib.Path(a.root or st.get("modernized_root") or ".").resolve()
     print(json.dumps(estimate(ws, st, root, a.out or forge(ws) / "cost.json"), indent=2))
